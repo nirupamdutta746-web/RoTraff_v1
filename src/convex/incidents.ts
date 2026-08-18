@@ -1,0 +1,173 @@
+import { v } from "convex/values";
+import { getAuthUserId } from "@convex-dev/auth/server";
+import { query, mutation } from "./_generated/server";
+
+// Get all active incidents
+export const list = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db
+      .query("incidents")
+      .withIndex("by_status", (q) => q.eq("status", "active"))
+      .order("desc")
+      .collect();
+  },
+});
+
+// Get incidents by type
+export const listByType = query({
+  args: { type: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("incidents")
+      .withIndex("by_type", (q) => q.eq("type", args.type as any))
+      .order("desc")
+      .collect();
+  },
+});
+
+// Get incidents near a location (bounding box)
+export const listNearby = query({
+  args: {
+    minLat: v.number(),
+    maxLat: v.number(),
+    minLng: v.number(),
+    maxLng: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const allIncidents = await ctx.db
+      .query("incidents")
+      .withIndex("by_status", (q) => q.eq("status", "active"))
+      .collect();
+
+    return allIncidents.filter(
+      (incident) =>
+        incident.lat >= args.minLat &&
+        incident.lat <= args.maxLat &&
+        incident.lng >= args.minLng &&
+        incident.lng <= args.maxLng,
+    );
+  },
+});
+
+// Get incidents by a specific user
+export const listByUser = query({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("incidents")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .order("desc")
+      .collect();
+  },
+});
+
+// Get a single incident by ID
+export const get = query({
+  args: { id: v.id("incidents") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.id);
+  },
+});
+
+// Report a new incident
+export const report = mutation({
+  args: {
+    type: v.string(),
+    severity: v.string(),
+    lat: v.number(),
+    lng: v.number(),
+    description: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const userId = await getAuthUserId(ctx);
+
+    if (!userId) {
+      throw new Error("You must be signed in to report an incident.");
+    }
+
+    const user = await ctx.db.get(userId);
+
+    return await ctx.db.insert("incidents", {
+      userId,
+      type: args.type as any,
+      severity: args.severity as any,
+      lat: args.lat,
+      lng: args.lng,
+      description: args.description,
+      status: "active",
+      reports: 1,
+      reportedBy: user?.name || "Anonymous",
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
+// Confirm / upvote an existing incident
+export const confirm = mutation({
+  args: { id: v.id("incidents") },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      throw new Error("You must be signed in to confirm an incident.");
+    }
+
+    const incident = await ctx.db.get(args.id);
+    if (!incident) {
+      throw new Error("Incident not found.");
+    }
+
+    await ctx.db.patch(args.id, {
+      reports: incident.reports + 1,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+// Update incident status
+export const updateStatus = mutation({
+  args: {
+    id: v.id("incidents"),
+    status: v.union(
+      v.literal("active"),
+      v.literal("resolved"),
+      v.literal("verified"),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      throw new Error("You must be signed in to update incidents.");
+    }
+
+    await ctx.db.patch(args.id, {
+      status: args.status,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+// Delete an incident (only by the reporter or admin)
+export const remove = mutation({
+  args: { id: v.id("incidents") },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      throw new Error("You must be signed in to delete incidents.");
+    }
+
+    const incident = await ctx.db.get(args.id);
+    if (!incident) {
+      throw new Error("Incident not found.");
+    }
+
+    const user = await ctx.db.get(userId);
+    if (incident.userId !== userId && user?.role !== "admin") {
+      throw new Error("You can only delete your own incidents.");
+    }
+
+    await ctx.db.delete(args.id);
+  },
+});
