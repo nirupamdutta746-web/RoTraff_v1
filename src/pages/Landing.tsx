@@ -1,5 +1,6 @@
 import { motion, useScroll, useTransform, useInView } from "framer-motion";
-import { useRef, type ReactNode } from "react";
+import { lazy, Suspense, useRef, type ReactNode } from "react";
+const TracingBeamDemo = lazy(() => import("@/components/TracingBeamDemo"));
 import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import {
@@ -477,6 +478,37 @@ export default function Landing() {
               </AnimatedSection>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* TracingBeam Story Section */}
+      <section className="relative py-24">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <AnimatedSection className="text-center max-w-2xl mx-auto mb-16">
+            <p className="text-sm font-semibold text-primary uppercase tracking-widest mb-3">
+              The full picture
+            </p>
+            <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
+              Why drivers choose <span className="gradient-text">SafeRoad</span>
+            </h2>
+            <p className="mt-4 text-muted-foreground text-lg leading-relaxed">
+              From the first tap on the map to the safest route home — here is
+              how every piece fits together.
+            </p>
+          </AnimatedSection>
+
+          <Suspense
+            fallback={
+              <div className="flex justify-center py-16">
+                <div className="glass-card p-6 flex items-center gap-3">
+                  <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                  <span className="text-sm text-muted-foreground font-medium">Loading…</span>
+                </div>
+              </div>
+            }
+          >
+            <TracingBeamDemo />
+          </Suspense>
         </div>
       </section>
 
