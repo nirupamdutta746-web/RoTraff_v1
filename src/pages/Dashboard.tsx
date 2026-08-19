@@ -841,7 +841,7 @@ export default function Dashboard() {
           </div>
 
           {/* ── Report FAB ──────────────────────────────────────── */}
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="absolute bottom-6 right-6 z-[50]">
+          <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="absolute top-4 left-4 z-[50]"
             <Button
               onClick={() => {
                 const opening = !showReportPanel;
