@@ -868,9 +868,9 @@ export default function Dashboard() {
               animate={{ x: 0, opacity: 1 }}
               exit={{ x: "100%", opacity: 0 }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="absolute right-0 top-0 bottom-0 w-full sm:w-96 glass-strong border-l border-white/30 z-[65] flex flex-col overflow-hidden"
+              className="absolute right-0 top-0 bottom-0 w-full sm:w-96 bg-white/95 backdrop-blur-xl border-l border-gray-200 z-[65] flex flex-col overflow-hidden shadow-2xl"
             >
-              <div className="p-4 border-b border-white/20 flex items-center justify-between">
+              <div className="p-4 border-b border-gray-200 flex items-center justify-between">
                 <div>
                   <h2 className="text-lg font-bold">Report Incident</h2>
                   <p className="text-xs text-muted-foreground mt-0.5">
@@ -903,9 +903,9 @@ export default function Dashboard() {
                   <label className="text-xs font-semibold block mb-1.5">Incident Type *</label>
                   <Select value={reportType} onValueChange={setReportType}>
                     <SelectTrigger className="glass border-white/30 bg-white/40 cursor-pointer"><SelectValue placeholder="Select type..." /></SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="bg-white border border-gray-200 shadow-xl z-[2000] min-w-[200px]">
                       {Object.entries(typeLabels).map(([k, l]) => (
-                        <SelectItem key={k} value={k}><div className="flex items-center gap-2">{typeIcons[k]}{l}</div></SelectItem>
+                        <SelectItem key={k} value={k} className="text-gray-900 hover:bg-gray-100 focus:bg-blue-50 focus:text-blue-700 cursor-pointer"><div className="flex items-center gap-2 text-gray-900">{typeIcons[k]}{l}</div></SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -930,7 +930,7 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <div className="p-4 border-t border-white/20">
+              <div className="p-4 border-t border-gray-200 bg-white/90">
                 <Button
                   onClick={handleReportSubmit}
                   disabled={!reportType || !reportSeverity || !reportLocation || isReporting}
