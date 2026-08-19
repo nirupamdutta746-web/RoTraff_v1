@@ -1,0 +1,1 @@
+import{c as o}from"./index-DR3Qs6zS.js";const t=[["path",{d:"M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8",key:"1357e3"}],["path",{d:"M3 3v5h5",key:"1xhq8a"}],["path",{d:"M12 7v5l4 2",key:"1fdv2h"}]],e=o("history",t);const a=[["polygon",{points:"3 11 22 2 13 21 11 13 3 11",key:"1ltx0t"}]],i=o("navigation",a);export{e as H,i as N};
