@@ -903,9 +903,9 @@ export default function Dashboard() {
                   <label className="text-xs font-semibold block mb-1.5">Incident Type *</label>
                   <Select value={reportType} onValueChange={setReportType}>
                     <SelectTrigger className="glass border-white/30 bg-white/40 cursor-pointer"><SelectValue placeholder="Select type..." /></SelectTrigger>
-                    <SelectContent className="bg-white border border-gray-200 shadow-xl z-[2000] min-w-[200px]">
+                    <SelectContent className="!bg-white !border-gray-200 !shadow-xl z-[2000] min-w-[200px]" style={{ backgroundColor: '#ffffff' }}>
                       {Object.entries(typeLabels).map(([k, l]) => (
-                        <SelectItem key={k} value={k} className="text-gray-900 hover:bg-gray-100 focus:bg-blue-50 focus:text-blue-700 cursor-pointer"><div className="flex items-center gap-2 text-gray-900">{typeIcons[k]}{l}</div></SelectItem>
+                        <SelectItem key={k} value={k} className="!text-gray-900 hover:!bg-gray-100 focus:!bg-blue-50 focus:!text-blue-700 cursor-pointer" style={{ color: '#1f2937' }}><div className="flex items-center gap-2" style={{ color: '#1f2937' }}>{typeIcons[k]}{l}</div></SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
