@@ -783,7 +783,7 @@ export default function Dashboard() {
                 initial={{ y: -10, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 exit={{ y: -10, opacity: 0 }}
-                className="absolute top-3 left-1/2 -translate-x-1/2 z-[70]"
+                className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000]"
               >
                 <div className="glass-strong rounded-full px-5 py-2 flex items-center gap-2 shadow-lg">
                   <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
@@ -815,7 +815,7 @@ export default function Dashboard() {
           </AnimatePresence>
 
           {/* ── Map controls (zoom + recenter) ──────────────────── */}
-          <div className="absolute top-4 right-4 z-[50] flex flex-col gap-2">
+          <div className="absolute top-4 right-4 z-[1000] flex flex-col gap-2">
             <div className="glass-strong rounded-xl overflow-hidden shadow-lg">
               <Button variant="ghost" size="icon" className="w-10 h-10 rounded-none cursor-pointer" onClick={() => setMapZoom((z) => Math.min(z + 1, 18))}>
                 <Plus className="w-4 h-4" />
@@ -841,7 +841,7 @@ export default function Dashboard() {
           </div>
 
           {/* ── Report FAB ──────────────────────────────────────── */}
-          <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="absolute top-4 left-4 z-[50]">
+          <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="absolute top-4 left-4 z-[1000]">
             <Button
               onClick={() => {
                 const opening = !showReportPanel;
