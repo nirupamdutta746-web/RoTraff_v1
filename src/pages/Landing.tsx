@@ -140,19 +140,19 @@ export default function Landing() {
     {
       name: "Sarah Chen",
       role: "Daily Commuter",
-      text: "SafeRoad saved me from a flooded highway last week. The community reports are incredibly accurate.",
+      text: "RoTraff saved me from a flooded highway last week. The community reports are incredibly accurate.",
       stars: 5,
     },
     {
       name: "Marcus Rivera",
       role: "Fleet Manager",
-      text: "We've reduced vehicle damage by 40% since integrating SafeRoad risk scores into our route planning.",
+      text: "We've reduced vehicle damage by 40% since integrating RoTraff risk scores into our route planning.",
       stars: 5,
     },
     {
       name: "Aisha Patel",
       role: "City Planner",
-      text: "The incident data from SafeRoad has become invaluable for identifying infrastructure priorities.",
+      text: "The incident data from RoTraff has become invaluable for identifying infrastructure priorities.",
       stars: 5,
     },
   ];
@@ -173,7 +173,7 @@ export default function Landing() {
                 <Shield className="w-5 h-5 text-white" />
               </div>
               <span className="text-lg font-bold tracking-tight text-foreground">
-                SafeRoad
+                RoTraff
               </span>
             </div>
             <div className="hidden md:flex items-center gap-8">
@@ -452,7 +452,7 @@ export default function Landing() {
               <span className="gradient-text">safer roads</span>
             </h2>
             <p className="mt-4 text-muted-foreground text-lg leading-relaxed">
-              From reporting hazards to planning the safest route — SafeRoad
+              From reporting hazards to planning the safest route — RoTraff
               gives you the tools to drive with confidence.
             </p>
           </AnimatedSection>
@@ -489,7 +489,7 @@ export default function Landing() {
               The full picture
             </p>
             <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-              Why drivers choose <span className="gradient-text">SafeRoad</span>
+              Why drivers choose <span className="gradient-text">RoTraff</span>
             </h2>
             <p className="mt-4 text-muted-foreground text-lg leading-relaxed">
               From the first tap on the map to the safest route home — here is
@@ -520,7 +520,7 @@ export default function Landing() {
               Simple &amp; effective
             </p>
             <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-              How <span className="gradient-text">SafeRoad</span> works
+              How <span className="gradient-text">RoTraff</span> works
             </h2>
           </AnimatedSection>
 
@@ -668,10 +668,10 @@ export default function Landing() {
               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center">
                 <Shield className="w-4 h-4 text-white" />
               </div>
-              <span className="font-bold text-foreground">SafeRoad</span>
+              <span className="font-bold text-foreground">RoTraff</span>
             </div>
             <p className="text-sm text-muted-foreground">
-              © 2026 SafeRoad. Making every road safer, one report at a time.
+              © 2026 RoTraff. Making every road safer, one report at a time.
             </p>
             <div className="flex items-center gap-6">
               <a

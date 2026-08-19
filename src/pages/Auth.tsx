@@ -137,7 +137,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         <Shield className="w-7 h-7 text-white" />
                       </div>
                     </div>
-                    <CardTitle className="text-xl">Welcome to SafeRoad</CardTitle>
+                    <CardTitle className="text-xl">Welcome to RoTraff</CardTitle>
                     <CardDescription>
                       Enter your email to sign in or create an account
                     </CardDescription>

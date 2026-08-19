@@ -410,7 +410,7 @@ export default function Dashboard() {
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-md shadow-blue-500/20">
               <Shield className="w-4 h-4 text-white" />
             </div>
-            <span className="font-bold text-foreground hidden sm:block">SafeRoad</span>
+            <span className="font-bold text-foreground hidden sm:block">RoTraff</span>
           </div>
         </div>
 
