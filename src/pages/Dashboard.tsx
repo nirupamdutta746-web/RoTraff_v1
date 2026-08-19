@@ -231,7 +231,10 @@ export default function Dashboard() {
 
   // ── Sidebar ──
   const [sidebarTab, setSidebarTab] = useState<"incidents" | "routes">("incidents");
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    if (typeof window !== "undefined") return window.innerWidth >= 768;
+    return true;
+  });
 
   // ─── Geolocation on mount ────────────────────────────────────────────
   useEffect(() => {
@@ -453,7 +456,7 @@ export default function Dashboard() {
               animate={{ width: 380, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.3, ease: "easeInOut" }}
-              className="glass-strong border-r border-white/30 z-[55] flex-shrink-0 overflow-hidden hidden md:flex flex-col"
+              className="glass-strong border-r border-white/30 z-[55] flex-shrink-0 overflow-hidden flex flex-col max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:w-80 max-md:shadow-2xl max-md:shadow-black/20"
             >
               {/* ── Incidents tab ─────────────────────────────────── */}
               {sidebarTab === "incidents" && (
@@ -795,6 +798,19 @@ export default function Dashboard() {
                   </Button>
                 </div>
               </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* ── Mobile sidebar backdrop ──────────────────────── */}
+          <AnimatePresence>
+            {isSidebarOpen && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute inset-0 bg-black/20 backdrop-blur-sm z-[54] md:hidden"
+                onClick={() => setIsSidebarOpen(false)}
+              />
             )}
           </AnimatePresence>
 
