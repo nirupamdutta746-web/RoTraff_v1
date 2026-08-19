@@ -3,10 +3,10 @@ import { useConvexAuth, useQuery } from "convex/react";
 
 export function useAuth() {
   const { isLoading: isAuthLoading, isAuthenticated } = useConvexAuth();
-  const user = useQuery(api.users.getCurrentUser);
+  const user = useQuery(api.users.currentUser);
 
   // Provide safe defaults for signIn/signOut when auth actions aren't available
-  const signIn = async () => {
+  const signIn = async (..._args: any[]) => {
     window.location.href = "/auth";
   };
   const signOut = async () => {
