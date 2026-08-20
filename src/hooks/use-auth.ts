@@ -4,13 +4,18 @@ import { useConvexAuth, useQuery } from "convex/react";
 
 export function useAuth() {
   const { isLoading: isAuthLoading, isAuthenticated } = useConvexAuth();
-  const user = useQuery(api.users.currentUser);
+  
+  // Only query user if authenticated to avoid unnecessary query pending states
+  const user = useQuery(api.users.currentUser, isAuthenticated ? undefined : "skip");
   const { signIn, signOut } = useAuthActions();
 
-  const isLoading = isAuthLoading || user === undefined;
+  // isLoading now strictly checks authentication state loading
+  const isLoading = isAuthLoading;
+  const isUserLoading = isAuthenticated && user === undefined;
 
   return {
     isLoading,
+    isUserLoading,
     isAuthenticated,
     user,
     signIn,

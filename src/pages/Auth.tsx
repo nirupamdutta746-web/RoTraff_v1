@@ -93,21 +93,27 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     }
   };
 
-  const handleGuestLogin = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      console.log("Attempting anonymous sign in...");
-      await signIn("anonymous");
-      console.log("Anonymous sign in successful");
-      navigate(redirect);
-    } catch (error) {
-      console.error("Guest login error:", error);
-      console.error("Error details:", JSON.stringify(error, null, 2));
-      setError(`Failed to sign in as guest: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      setIsLoading(false);
-    }
-  };
+ const handleGuestLogin = async (e?: React.MouseEvent) => {
+  if (e) e.preventDefault();
+  setIsLoading(true);
+  setError(null);
+
+  try {
+    console.log("Attempting anonymous sign in...");
+    await signIn("anonymous");
+    // Do NOT navigate manually here.
+    // The useEffect listening to `isAuthenticated` will trigger navigation 
+    // cleanly as soon as Convex updates state.
+  } catch (error) {
+    console.error("Guest login error:", error);
+    setError(
+      `Failed to sign in as guest: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`
+    );
+    setIsLoading(false);
+  }
+};
 
   return (
     <div className="min-h-screen gradient-bg flex flex-col">
@@ -193,7 +199,11 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                           onClick={handleGuestLogin}
                           disabled={isLoading}
                         >
-                          <UserX className="mr-2 h-4 w-4" />
+                          {isLoading ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <UserX className="mr-2 h-4 w-4" />
+                          )}
                           Continue as Guest
                         </Button>
                       </div>
