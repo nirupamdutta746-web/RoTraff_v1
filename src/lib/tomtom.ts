@@ -72,18 +72,24 @@ export async function getTrafficIncidents(
 
 // ── Routing ───────────────────────────────────────────────────────────────
 
+export type TravelMode = "car" | "bicycle" | "pedestrian";
+
 /**
  * Calculate a real route using TomTom Directions API.
  * @param origin [lat, lng]
  * @param destination [lat, lng]
  * @param routeType "fastest" | "shortest" | "eco" | "thrilling"
  * @param traffic boolean - whether to use traffic data
+ * @param travelMode "car" | "bicycle" | "pedestrian"
+ * @param avoid comma-separated avoid constraints, e.g. "tollRoads,motorways"
  */
 export async function calculateRoute(
   origin: [number, number],
   destination: [number, number],
-  routeType: "fastest" | "shortest" | "eco" | "thrilling" = "fastest",
+  routeType: "fastest" | "short" | "eco" | "thrilling" = "fastest",
   traffic: boolean = true,
+  travelMode: TravelMode = "car",
+  avoid?: string,
 ): Promise<TomTomRoute> {
   const key = getKey();
   const oLng = origin[1];
@@ -91,7 +97,8 @@ export async function calculateRoute(
   const dLng = destination[1];
   const dLat = destination[0];
 
-  const url = `${DIRECT}/routing/1/calculateRoute/${oLat},${oLng}:${dLat},${dLng}/json?key=${key}&routeType=${routeType}&traffic=${traffic ? "live" : "false"}&travelMode=car&language=en-US`;
+  let url = `${DIRECT}/routing/1/calculateRoute/${oLat},${oLng}:${dLat},${dLng}/json?key=${key}&routeType=${routeType}&traffic=${traffic ? "live" : "false"}&travelMode=${travelMode}&language=en-US`;
+  if (avoid) url += `&avoid=${avoid}`;
 
   const resp = await fetch(url, { mode: "cors" });
   const data = await resp.json();
@@ -142,11 +149,17 @@ export async function calculateRoute(
 export async function calculateRoutes(
   origin: [number, number],
   destination: [number, number],
+  travelMode: TravelMode = "car",
 ): Promise<{ fastest: TomTomRoute; shortest: TomTomRoute; eco: TomTomRoute }> {
+  // Three separate calls using valid TomTom routeType values.
+  // Different routeTypes produce genuinely different road selections.
   const [fastest, shortest, eco] = await Promise.all([
-    calculateRoute(origin, destination, "fastest", true),
-    calculateRoute(origin, destination, "shortest", false),
-    calculateRoute(origin, destination, "eco", true),
+    // Route 1 — fastest considering live traffic
+    calculateRoute(origin, destination, "fastest", true, travelMode),
+    // Route 2 — shortest distance, traffic ignored for different geometry
+    calculateRoute(origin, destination, "short", false, travelMode),
+    // Route 3 — eco-friendly (optimized for fuel efficiency, different roads)
+    calculateRoute(origin, destination, "eco", true, travelMode),
   ]);
   return { fastest, shortest, eco };
 }

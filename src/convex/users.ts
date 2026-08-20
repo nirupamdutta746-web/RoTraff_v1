@@ -69,6 +69,58 @@ export const clearAllSessions = mutation({
   },
 });
 
+// Set user role (admin only)
+export const setRole = mutation({
+  args: { userId: v.id("users"), role: v.union(v.literal("admin"), v.literal("user"), v.literal("member")) },
+  handler: async (ctx, args) => {
+    const callerId = await getAuthUserId(ctx);
+    if (!callerId) throw new Error("Not authenticated.");
+    const caller = await ctx.db.get(callerId);
+    if (caller?.role !== "admin") throw new Error("Admin access required.");
+    await ctx.db.patch(args.userId, { role: args.role });
+    return { success: true };
+  },
+});
+
+// Ensure current user has a role (assigns 'user' if none exists)
+// Called after login to guarantee every user has a role.
+export const ensureRole = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("Not authenticated.");
+    const user = await ctx.db.get(userId);
+    if (!user) throw new Error("User not found.");
+    if (!user.role) {
+      await ctx.db.patch(userId, { role: "user" });
+    }
+    return { role: user.role || "user" };
+  },
+});
+
+// Check if current user is admin
+export const isAdmin = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return false;
+    const user = await ctx.db.get(userId);
+    return user?.role === "admin";
+  },
+});
+
+// List all users (admin only)
+export const listAll = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return [];
+    const user = await ctx.db.get(userId);
+    if (user?.role !== "admin") return [];
+    return await ctx.db.query("users").collect();
+  },
+});
+
 // Delete the current user's account and all associated data
 export const deleteAccount = mutation({
   args: {},
@@ -95,6 +147,43 @@ export const deleteAccount = mutation({
     }
     // Delete the user record
     await ctx.db.delete(userId);
+    return { success: true };
+  },
+});
+
+// Delete any user and all associated data (admin only)
+export const adminDeleteUser = mutation({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const callerId = await getAuthUserId(ctx);
+    if (!callerId) throw new Error("Not authenticated.");
+    const caller = await ctx.db.get(callerId);
+    if (caller?.role !== "admin") throw new Error("Admin access required.");
+    if (args.userId === callerId) throw new Error("Admin cannot delete their own account.");
+
+    const targetUser = await ctx.db.get(args.userId);
+    if (!targetUser) throw new Error("User not found.");
+
+    // Delete all user's sessions
+    const sessions = await ctx.db
+      .query("sessions")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .collect();
+    for (const s of sessions) {
+      await ctx.db.delete(s._id);
+    }
+
+    // Delete all user's incidents
+    const incidents = await ctx.db
+      .query("incidents")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .collect();
+    for (const inc of incidents) {
+      await ctx.db.delete(inc._id);
+    }
+
+    // Delete the user record
+    await ctx.db.delete(args.userId);
     return { success: true };
   },
 });

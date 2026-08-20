@@ -80,6 +80,7 @@ const schema = defineSchema(
       lat: v.number(),
       lng: v.number(),
       description: v.optional(v.string()),
+      imageUrl: v.optional(v.string()),
       status: v.union(
         v.literal("active"),
         v.literal("resolved"),
@@ -88,6 +89,7 @@ const schema = defineSchema(
       ),
       reports: v.number(),
       reportedBy: v.string(),
+      verifiedBy: v.optional(v.id("users")),
       createdAt: v.number(),
       updatedAt: v.number(),
     })

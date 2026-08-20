@@ -539,6 +539,24 @@ export default function Profile() {
           </div>
         </AnimatedCard>
 
+        {/* ══════ ADMIN PANEL ══════ */}
+        {user?.role === "admin" && (
+          <AnimatedCard delay={0.5}>
+            <div className="glass-card overflow-hidden border border-red-200/50">
+              <div className="p-4 border-b border-red-100/50">
+                <h3 className="text-sm font-bold flex items-center gap-2 text-red-600">
+                  <ShieldCheck className="w-4 h-4" /> Admin Panel
+                </h3>
+              </div>
+              <div className="p-4">
+                <Button className="w-full cursor-pointer bg-gradient-to-r from-red-500 to-orange-500 text-white border-0 hover:from-red-600 hover:to-orange-600" onClick={() => navigate("/admin")}>
+                  <ShieldCheck className="w-4 h-4 mr-2" /> Open Admin Dashboard
+                </Button>
+              </div>
+            </div>
+          </AnimatedCard>
+        )}
+
         {/* ══════ DANGER ZONE ══════ */}
         <AnimatedCard delay={0.55}>
           <div className="glass-card overflow-hidden border border-red-200/50">

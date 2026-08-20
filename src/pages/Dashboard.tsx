@@ -17,7 +17,7 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { calculateRoutes, searchPlaces, reverseGeocode } from "@/lib/tomtom";
-import type { TomTomRoute } from "@/lib/tomtom";
+import type { TomTomRoute, TravelMode } from "@/lib/tomtom";
 import {
   AlertTriangle,
   MapPin,
@@ -206,6 +206,7 @@ export default function Dashboard() {
   const confirmIncident = useMutation(api.incidents.confirm);
   const createSession = useMutation(api.sessions.create);
   const rewardBalance = useQuery(api.rewards.getBalance);
+  const isAdmin = useQuery(api.users.isAdmin);
   useRewardToast();
 
   // ── Map state ──
@@ -234,19 +235,23 @@ export default function Dashboard() {
   const [selectedRoute, setSelectedRoute] = useState<"fastest" | "safest" | "balanced">("balanced");
   const [routes, setRoutes] = useState<ReturnType<typeof generateRoute>[]>([]);
   const [isCalculating, setIsCalculating] = useState(false);
+  const [travelMode, setTravelMode] = useState<TravelMode>("car");
+
+  // ── Image upload state ──
+  const [reportImage, setReportImage] = useState<string | null>(null);
 
   // ── Route search (autocomplete for origin/dest) ──
   const [routeSearchTarget, setRouteSearchTarget] = useState<"origin" | "dest" | null>(null);
   const [routeSearchQuery, setRouteSearchQuery] = useState("");
   const [routeSearchResults, setRouteSearchResults] = useState<any[]>([]);
   const [isRouteSearching, setIsRouteSearching] = useState(false);
-  const routeSearchTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const routeSearchTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // ── Map search (top bar) ──
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const searchTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const searchTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // ── Filters ──
   const [typeFilter, setTypeFilter] = useState<string>("all");
@@ -257,6 +262,14 @@ export default function Dashboard() {
     if (typeof window !== "undefined") return window.innerWidth >= 768;
     return true;
   });
+
+  // ─── Recalculate routes when travel mode changes ───────────────────────
+  useEffect(() => {
+    if (originCoords && destCoords && routes.length > 0) {
+      handleCalculateRoutes();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [travelMode]);
 
   // ─── Geolocation on mount ────────────────────────────────────────────
   useEffect(() => {
@@ -396,6 +409,7 @@ export default function Dashboard() {
         lat: reportLocation[0],
         lng: reportLocation[1],
         description: reportDesc || undefined,
+        imageUrl: reportImage || undefined,
       });
       await createSession({
         type: "report",
@@ -411,6 +425,7 @@ export default function Dashboard() {
       setReportSeverity("");
       setReportDesc("");
       setReportLocation(null);
+      setReportImage(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to report incident.");
     } finally {
@@ -426,22 +441,44 @@ export default function Dashboard() {
     }
     setIsCalculating(true);
     try {
-      const { fastest, shortest, eco } = await calculateRoutes(originCoords, destCoords);
+      const { fastest, shortest, eco } = await calculateRoutes(originCoords, destCoords, travelMode);
 
-      // Convert TomTom routes to our format, adding risk scores based on incidents
-      const incidentCount = filteredIncidents.length;
-      const toRoute = (r: TomTomRoute, riskBase: number) => ({
+      // Calculate risk score based on actual incidents near the route
+      // Count incidents within ~2km of any route point
+      const routeRiskScore = (route: TomTomRoute): number => {
+        let nearbyIncidents = 0;
+        let severityPenalty = 0;
+        for (const inc of filteredIncidents) {
+          for (const pt of route.path) {
+            const distKm = Math.sqrt(
+              Math.pow((inc.lat - pt[0]) * 111, 2) +
+              Math.pow((inc.lng - pt[1]) * 111 * Math.cos((pt[0] * Math.PI) / 180), 2),
+            );
+            if (distKm < 2) {
+              nearbyIncidents++;
+              if (inc.severity === "critical") severityPenalty += 15;
+              else if (inc.severity === "high") severityPenalty += 10;
+              else if (inc.severity === "medium") severityPenalty += 5;
+              else severityPenalty += 2;
+              break; // count each incident only once
+            }
+          }
+        }
+        return Math.min(Math.max(Math.round(nearbyIncidents * 5 + severityPenalty), 2), 98);
+      };
+
+      const toRoute = (r: TomTomRoute) => ({
         path: r.path,
-        riskScore: Math.min(Math.max(riskBase + incidentCount * 2, 2), 98),
+        riskScore: routeRiskScore(r),
         travelTime: r.travelTime,
         distance: r.distance,
         trafficDelay: r.trafficDelay,
       });
 
       setRoutes([
-        toRoute(fastest, 35),
-        toRoute(eco, 18),
-        toRoute(shortest, 5),
+        toRoute(fastest),
+        toRoute(eco),
+        toRoute(shortest),
       ]);
       setSelectedRoute("balanced");
 
@@ -469,7 +506,7 @@ export default function Dashboard() {
           destName: destAddr,
           riskScore: routes[1]?.riskScore || 18,
           travelTime: fastest.travelTime,
-          incidentsNearby: incidentCount,
+          incidentsNearby: filteredIncidents.length,
         });
       } catch { /* best-effort */ }
 
@@ -577,6 +614,12 @@ export default function Dashboard() {
           <Button variant="ghost" size="icon" className="cursor-pointer" onClick={() => navigate("/profile")}>
             <User className="w-4 h-4" />
           </Button>
+          {isAdmin && (
+            <Button variant="ghost" size="sm" className="cursor-pointer gap-1.5 text-red-600" onClick={() => navigate("/admin")}>
+              <Shield className="w-4 h-4" />
+              <span className="hidden lg:inline">Admin</span>
+            </Button>
+          )}
           <Button variant="ghost" size="icon" className="cursor-pointer text-muted-foreground hover:text-destructive" onClick={handleSignOut}>
             <LogOut className="w-4 h-4" />
           </Button>
@@ -790,6 +833,30 @@ export default function Dashboard() {
                       Use current location as origin
                     </Button>
 
+                    {/* Transport mode */}
+                    <div>
+                      <label className="text-xs font-semibold block mb-1.5">Transport Mode</label>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {([
+                          { key: "car" as const, label: "🚗 Car", icon: "🚗" },
+                          { key: "bicycle" as const, label: "🚲 Bike", icon: "🚲" },
+                          { key: "pedestrian" as const, label: "🚶 Walk", icon: "🚶" },
+                        ]).map((m) => (
+                          <button
+                            key={m.key}
+                            onClick={() => setTravelMode(m.key)}
+                            className={`rounded-lg py-2.5 px-2 text-xs font-semibold transition-all cursor-pointer border ${
+                              travelMode === m.key
+                                ? "bg-blue-500 text-white border-blue-600 shadow-md shadow-blue-500/20"
+                                : "bg-white/40 hover:bg-white/60 border-white/30 text-foreground"
+                            }`}
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     {/* Calculate button */}
                     <Button
                       onClick={handleCalculateRoutes}
@@ -825,6 +892,10 @@ export default function Dashboard() {
                               <div className="flex items-center gap-2">
                                 <opt.icon className={`w-4 h-4 ${opt.color}`} />
                                 <span className="text-sm font-bold">{opt.label}</span>
+                                {/* Mini line-style indicator matching the map polyline */}
+                                <svg width="24" height="6" className="flex-shrink-0">
+                                  <line x1="0" y1="3" x2="24" y2="3" stroke="currentColor" strokeWidth="2.5" strokeDasharray={opt.key === "fastest" ? "none" : opt.key === "balanced" ? "6 3" : "2 4"} className={opt.color} />
+                                </svg>
                               </div>
                               {sel && <CheckCircle2 className="w-4 h-4 text-primary" />}
                             </div>
@@ -944,20 +1015,28 @@ export default function Dashboard() {
             {/* Route polyline */}
             {routes.length > 0 && selectedRouteData && (
               <>
-                {/* Draw all routes dimmed */}
+                {/* Draw all routes – inactive ones still visible */}
                 {routes.map((r, i) => {
                   const keys = ["fastest", "balanced", "safest"] as const;
                   const isActive = keys[i] === selectedRoute;
                   const color = keys[i] === "safest" ? "#10b981" : keys[i] === "fastest" ? "#f59e0b" : "#3b82f6";
+                  // Each route gets a distinct dash pattern so they're always distinguishable
+                  const dashPatterns: Record<string, string | undefined> = {
+                    fastest: undefined,            // solid line
+                    balanced: "12 8",              // long dashes
+                    safest: "4 8",                 // short dashes / dotted
+                  };
                   return (
                     <Polyline
                       key={keys[i]}
                       positions={r.path}
                       pathOptions={{
                         color,
-                        weight: isActive ? 6 : 3,
-                        opacity: isActive ? 0.9 : 0.25,
-                        dashArray: keys[i] === "safest" && isActive ? "8 6" : undefined,
+                        weight: isActive ? 7 : 4,
+                        opacity: isActive ? 0.95 : 0.45,
+                        dashArray: dashPatterns[keys[i]],
+                        lineCap: "round",
+                        lineJoin: "round",
                       }}
                     />
                   );
@@ -1156,6 +1235,43 @@ export default function Dashboard() {
                 <div>
                   <label className="text-xs font-semibold block mb-1.5">Description</label>
                   <Textarea placeholder="Additional details (optional)..." value={reportDesc} onChange={(e) => setReportDesc(e.target.value)} className="glass border-white/30 bg-white/40 resize-none h-20" />
+                </div>
+
+                {/* Photo Upload */}
+                <div>
+                  <label className="text-xs font-semibold block mb-1.5">Photo Proof (optional)</label>
+                  <div className="glass rounded-xl border-2 border-dashed border-gray-300 p-4 text-center hover:border-blue-400 transition-colors">
+                    {reportImage ? (
+                      <div className="space-y-2">
+                        <img src={reportImage} alt="Incident proof" className="w-full h-32 object-cover rounded-lg" />
+                        <Button variant="ghost" size="sm" className="cursor-pointer text-xs text-red-500" onClick={() => setReportImage(null)}>Remove Photo</Button>
+                      </div>
+                    ) : (
+                      <label className="cursor-pointer block">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            if (file.size > 5 * 1024 * 1024) {
+                              toast.error("Image must be under 5MB");
+                              return;
+                            }
+                            const reader = new FileReader();
+                            reader.onload = () => setReportImage(reader.result as string);
+                            reader.readAsDataURL(file);
+                          }}
+                        />
+                        <div className="space-y-1">
+                          <svg className="w-8 h-8 mx-auto text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                          <p className="text-xs text-muted-foreground">Tap to upload a photo as proof</p>
+                          <p className="text-[10px] text-gray-400">JPG, PNG up to 5MB</p>
+                        </div>
+                      </label>
+                    )}
+                  </div>
                 </div>
               </div>
 

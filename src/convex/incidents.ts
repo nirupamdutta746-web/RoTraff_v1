@@ -99,6 +99,7 @@ export const report = mutation({
     lat: v.number(),
     lng: v.number(),
     description: v.optional(v.string()),
+    imageUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -117,6 +118,7 @@ export const report = mutation({
       lat: args.lat,
       lng: args.lng,
       description: args.description,
+      imageUrl: args.imageUrl,
       status: "active",
       reports: 1,
       reportedBy: user?.name || "Anonymous",
@@ -227,5 +229,83 @@ export const remove = mutation({
     }
 
     await ctx.db.delete(args.id);
+  },
+});
+
+// Admin: verify an incident
+export const adminVerify = mutation({
+  args: { id: v.id("incidents") },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("Not authenticated.");
+    const user = await ctx.db.get(userId);
+    if (user?.role !== "admin") throw new Error("Admin access required.");
+
+    await ctx.db.patch(args.id, {
+      status: "verified",
+      verifiedBy: userId,
+      updatedAt: Date.now(),
+    });
+    return { success: true };
+  },
+});
+
+// Admin: remove an incident from the map
+export const adminRemove = mutation({
+  args: { id: v.id("incidents") },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("Not authenticated.");
+    const user = await ctx.db.get(userId);
+    if (user?.role !== "admin") throw new Error("Admin access required.");
+
+    await ctx.db.patch(args.id, {
+      status: "resolved",
+      updatedAt: Date.now(),
+    });
+    return { success: true };
+  },
+});
+
+// Admin: list ALL incidents including resolved
+export const adminListAll = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db.query("incidents").order("desc").collect();
+  },
+});
+
+// Get incidents near a specific point (for route risk calculation)
+export const listNearPoint = query({
+  args: {
+    lat: v.number(),
+    lng: v.number(),
+    radiusKm: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const latDeg = args.radiusKm / 111;
+    const lngDeg = args.radiusKm / (111 * Math.cos((args.lat * Math.PI) / 180));
+    const minLat = args.lat - latDeg;
+    const maxLat = args.lat + latDeg;
+    const minLng = args.lng - lngDeg;
+    const maxLng = args.lng + lngDeg;
+
+    const active = await ctx.db
+      .query("incidents")
+      .withIndex("by_status", (q) => q.eq("status", "active"))
+      .collect();
+    const verified = await ctx.db
+      .query("incidents")
+      .withIndex("by_status", (q) => q.eq("status", "verified"))
+      .collect();
+    const permanent = await ctx.db
+      .query("incidents")
+      .withIndex("by_status", (q) => q.eq("status", "permanent"))
+      .collect();
+    const allIncidents = [...active, ...verified, ...permanent];
+
+    return allIncidents.filter(
+      (inc) => inc.lat >= minLat && inc.lat <= maxLat && inc.lng >= minLng && inc.lng <= maxLng,
+    );
   },
 });
