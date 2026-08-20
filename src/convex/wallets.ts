@@ -1,6 +1,9 @@
 import { v } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { query, mutation } from "./_generated/server";
+import { query, mutation, action } from "./_generated/server";
+import { api } from "./_generated/api";
+import { getAssetInfo as getStellarAssetInfo } from "../lib/stellar";
+import type { AssetInfo } from "../lib/stellar";
 
 /**
  * Wallet queries and mutations.
@@ -59,12 +62,29 @@ export const getWalletByUser = query({
   },
 });
 
+// ── Asset Info ────────────────────────────────────────────────────────────
+
+/**
+ * Get the ROTR asset metadata including the issuing account public key
+ * (which serves as the Stellar "contract ID" for this asset).
+ */
+export const getAssetInfo = query({
+  args: {},
+  handler: async () => {
+    return getStellarAssetInfo();
+  },
+});
+
 // ── Mutations ────────────────────────────────────────────────────────────
 
 /**
  * Provision a Stellar wallet for the current user.
  * Idempotent: checks for existing wallet before creating.
  * Calls Friendbot + ChangeTrust internally via Stellar service.
+ */
+/**
+ * Provision a Stellar wallet for the current user.
+ * Schedules the actual provisioning as an action (fetch only runs in actions).
  */
 export const provision = mutation({
   args: {},
@@ -81,19 +101,40 @@ export const provision = mutation({
       return { alreadyProvisioned: true, publicKey: existing.stellarPublicKey };
     }
 
-    // Import Stellar service (only runs server-side in Convex)
-    const { provisionWallet } = await import("../lib/stellar");
-    const result = await provisionWallet();
+    // Schedule the action that does the actual Stellar provisioning
+    await ctx.scheduler.runAfter(0, api.walletActions.provisionWalletAction, {
+      userId,
+    });
+
+    return { alreadyProvisioned: false, publicKey: "pending" };
+  },
+});
+
+// ── Action (runs fetch) ───────────────────────────────────────────────────
+
+/**
+ * Save a provisioned wallet to the database (called from walletActions).
+ */
+export const saveWallet = mutation({
+  args: {
+    userId: v.id("users"),
+    publicKey: v.string(),
+    secretKeyEncrypted: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("wallets")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .unique();
+    if (existing) return; // already saved
 
     await ctx.db.insert("wallets", {
-      userId,
-      stellarPublicKey: result.publicKey,
-      stellarSecretKeyEncrypted: result.secretKeyEncrypted,
+      userId: args.userId,
+      stellarPublicKey: args.publicKey,
+      stellarSecretKeyEncrypted: args.secretKeyEncrypted,
       provisionedAt: Date.now(),
       status: "active",
     });
-
-    return { alreadyProvisioned: false, publicKey: result.publicKey };
   },
 });
 

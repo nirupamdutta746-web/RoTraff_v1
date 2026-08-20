@@ -55,7 +55,7 @@ export const getBalance = query({
       .collect();
 
     return txns
-      .filter((t) => t.status === "confirmed")
+      .filter((t) => t.status !== "failed")
       .reduce((sum, t) => sum + t.amount, 0);
   },
 });
@@ -97,15 +97,9 @@ export const creditReport = mutation({
       .unique();
 
     if (!wallet) {
-      // Provision inline (synchronous within this mutation is fine for first time)
-      const { provisionWallet } = await import("../lib/stellar");
-      const result = await provisionWallet();
-      await ctx.db.insert("wallets", {
+      // Schedule wallet provisioning as an action (fetch only runs in actions)
+      await ctx.scheduler.runAfter(0, api.walletActions.provisionWalletAction, {
         userId: args.userId,
-        stellarPublicKey: result.publicKey,
-        stellarSecretKeyEncrypted: result.secretKeyEncrypted,
-        provisionedAt: Date.now(),
-        status: "active",
       });
     }
 
@@ -180,6 +174,64 @@ export const confirmReward = mutation({
       stellarTransactionHash: args.stellarTransactionHash,
       confirmedAt: Date.now(),
     });
+  },
+});
+
+/**
+ * Retry a failed reward by resetting it to pending and re-scheduling processing.
+ * Only allows retrying transactions that were recently failed (within 1 hour).
+ */
+export const retryFailedReward = mutation({
+  args: { transactionId: v.id("rewardTransactions") },
+  handler: async (ctx, args) => {
+    const txn = await ctx.db.get(args.transactionId);
+    if (!txn || txn.status !== "failed") return { retried: false };
+
+    // Only allow retrying recent failures (within 1 hour)
+    if (Date.now() - txn.createdAt > 60 * 60 * 1000) return { retried: false };
+
+    // Reset to pending and clear retry count
+    await ctx.db.patch(args.transactionId, {
+      status: "pending",
+      retryCount: 0,
+    });
+
+    // Re-schedule the payment processing
+    await ctx.scheduler.runAfter(0, api.rewardActions.processPendingReward, {
+      rewardTransactionId: args.transactionId,
+    });
+
+    return { retried: true };
+  },
+});
+
+/**
+ * One-off admin reset: force any failed reward back to pending.
+ * No time window restriction — use this to recover transactions
+ * that failed due to the wallet provisioning race condition.
+ *
+ * Paste into Convex dashboard → Functions → rewards.forceRetryFailedReward
+ * Args: { transactionId: "<id>" }
+ */
+export const forceRetryFailedReward = mutation({
+  args: { transactionId: v.id("rewardTransactions") },
+  handler: async (ctx, args) => {
+    const txn = await ctx.db.get(args.transactionId);
+    if (!txn) return { success: false, error: "Transaction not found" };
+    if (txn.status !== "failed") return { success: false, error: `Status is '${txn.status}', not 'failed'` };
+
+    // Reset to pending and clear retry count
+    await ctx.db.patch(args.transactionId, {
+      status: "pending",
+      retryCount: 0,
+    });
+
+    // Re-schedule the payment processing
+    await ctx.scheduler.runAfter(0, api.rewardActions.processPendingReward, {
+      rewardTransactionId: args.transactionId,
+    });
+
+    return { success: true, message: `Reset tx ${args.transactionId} to pending, re-scheduled for payment.` };
   },
 });
 

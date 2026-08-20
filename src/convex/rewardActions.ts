@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { api } from "./_generated/api";
+import { sendRewardPayment } from "../lib/stellar";
 
 /**
  * Process a single pending reward by sending Stellar payment.
@@ -28,15 +29,29 @@ export const processPendingReward = action({
       userId: rewardRow.userId,
     });
     if (!wallet || wallet.status !== "active") {
+      // Wallet may still be provisioning (race with provisionWalletAction).
+      // Retry later instead of immediately failing — but only while under the retry cap.
+      const retries = (rewardRow.retryCount ?? 0);
+      if (retries >= 3) {
+        // Already exhausted retries — fail permanently
+        await ctx.runMutation(api.rewards.updateRewardStatus, {
+          transactionId: args.rewardTransactionId,
+          status: "failed",
+        });
+        return;
+      }
+      // Increment retryCount and reschedule for later
       await ctx.runMutation(api.rewards.updateRewardStatus, {
         transactionId: args.rewardTransactionId,
-        status: "failed",
+        status: "pending",
+      });
+      await ctx.scheduler.runAfter(10_000, api.rewardActions.processPendingReward, {
+        rewardTransactionId: args.rewardTransactionId,
       });
       return;
     }
 
     try {
-      const { sendRewardPayment } = await import("../lib/stellar");
       const result = await sendRewardPayment(
         wallet.publicKey,
         rewardRow.amount,

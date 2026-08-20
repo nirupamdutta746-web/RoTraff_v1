@@ -151,6 +151,9 @@ export async function sendRewardPayment(
   const { distributionKeypair, rotAsset } = getConfig();
   const distributionPub = distributionKeypair.publicKey();
 
+  // Ensure distribution account has a trustline for ROTR
+  await ensureDistributionTrustline();
+
   const account = await server.loadAccount(distributionPub);
   const tx = new TransactionBuilder(account, {
     fee: "100",
@@ -174,6 +177,48 @@ export async function sendRewardPayment(
   }
 
   return { hash: result.hash };
+}
+
+// ── Distribution Trustline Safety Check ───────────────────────────────────
+
+/**
+ * Ensures the distribution account has an active ROTR trustline.
+ * Called before the first payment to prevent op_no_trust errors.
+ */
+async function ensureDistributionTrustline(): Promise<void> {
+  const { distributionKeypair, rotAsset } = getConfig();
+  const distributionPub = distributionKeypair.publicKey();
+
+  try {
+    const account = await server.loadAccount(distributionPub);
+    const hasTrustline = account.balances.some(
+      (b: any) =>
+        b.asset_type !== "native" &&
+        b.asset_code === ROTR_ASSET_CODE &&
+        b.asset_issuer === rotAsset.getIssuer(),
+    );
+
+    if (!hasTrustline) {
+      const tx = new TransactionBuilder(account, {
+        fee: "100",
+        networkPassphrase: NETWORK_PASSPHRASE,
+      })
+        .addOperation(
+          Operation.changeTrust({
+            asset: rotAsset,
+            limit: "1000000000",
+          }),
+        )
+        .setTimeout(30)
+        .build();
+
+      tx.sign(distributionKeypair);
+      await server.submitTransaction(tx);
+    }
+  } catch {
+    // If we can't check/set the trustline, let the payment attempt fail naturally
+    // so the error is logged but we don't crash here
+  }
 }
 
 // ── Balance Query (read-only) ──────────────────────────────────────────────
@@ -222,4 +267,44 @@ export async function getDistributionBalance(): Promise<string> {
   const { distributionKeypair } = getConfig();
   const info = await getRotBalance(distributionKeypair.publicKey());
   return info.balance;
+}
+
+// ── Asset Info (Contract ID equivalent) ───────────────────────────────────
+
+export interface AssetInfo {
+  /** The issuing account public key — acts as the "contract ID" for this asset */
+  issuingPublicKey: string;
+  /** The Soroban Smart Contract ID (starts with C) */
+  sorobanContractId: string | null;
+  assetCode: string;
+  /** Full Stellar asset identifier: "CODE:ISSUER_ADDRESS" */
+  assetIdentifier: string;
+  networkPassphrase: string;
+  horizonUrl: string;
+  explorerBaseUrl: string;
+}
+
+/**
+ * Returns the ROTR asset metadata, or null if env vars are not configured.
+ * The issuing account public key serves as the contract identifier
+ * for Stellar classic assets (equivalent to a Soroban contract address).
+ */
+export function getAssetInfo(): AssetInfo | null {
+  try {
+    const { issuingKeypair } = getConfig();
+    const issuingPublicKey = issuingKeypair.publicKey();
+    const sorobanContractId = process.env.STELLAR_CONTRACT_ID || null;
+    return {
+      issuingPublicKey,
+      sorobanContractId,
+      assetCode: ROTR_ASSET_CODE,
+      assetIdentifier: `${ROTR_ASSET_CODE}:${issuingPublicKey}`,
+      networkPassphrase: NETWORK_PASSPHRASE,
+      horizonUrl: HORIZON_URL,
+      explorerBaseUrl: "https://stellar.expert/explorer/testnet",
+    };
+  } catch {
+    // Env vars not configured — return null instead of crashing
+    return null;
+  }
 }

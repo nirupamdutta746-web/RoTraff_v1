@@ -84,6 +84,7 @@ const schema = defineSchema(
         v.literal("active"),
         v.literal("resolved"),
         v.literal("verified"),
+        v.literal("permanent"),
       ),
       reports: v.number(),
       reportedBy: v.string(),

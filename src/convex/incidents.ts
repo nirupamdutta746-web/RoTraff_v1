@@ -3,15 +3,26 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation } from "./_generated/server";
 import { api } from "./_generated/api";
 
-// Get all active incidents
+// Get all visible incidents (active + verified + permanent)
 export const list = query({
   args: {},
   handler: async (ctx) => {
-    return await ctx.db
+    const active = await ctx.db
       .query("incidents")
       .withIndex("by_status", (q) => q.eq("status", "active"))
       .order("desc")
       .collect();
+    const verified = await ctx.db
+      .query("incidents")
+      .withIndex("by_status", (q) => q.eq("status", "verified"))
+      .order("desc")
+      .collect();
+    const permanent = await ctx.db
+      .query("incidents")
+      .withIndex("by_status", (q) => q.eq("status", "permanent"))
+      .order("desc")
+      .collect();
+    return [...active, ...verified, ...permanent];
   },
 });
 
@@ -36,10 +47,19 @@ export const listNearby = query({
     maxLng: v.number(),
   },
   handler: async (ctx, args) => {
-    const allIncidents = await ctx.db
+    const active = await ctx.db
       .query("incidents")
       .withIndex("by_status", (q) => q.eq("status", "active"))
       .collect();
+    const verified = await ctx.db
+      .query("incidents")
+      .withIndex("by_status", (q) => q.eq("status", "verified"))
+      .collect();
+    const permanent = await ctx.db
+      .query("incidents")
+      .withIndex("by_status", (q) => q.eq("status", "permanent"))
+      .collect();
+    const allIncidents = [...active, ...verified, ...permanent];
 
     return allIncidents.filter(
       (incident) =>
@@ -107,8 +127,10 @@ export const report = mutation({
 });
 
 // Confirm / upvote an existing incident
-// When reports cross the verification threshold, auto-verify and credit a reward.
-const VERIFICATION_THRESHOLD = 3;
+// REWARD_THRESHOLD: credit the reporter after this many confirmations.
+// PERMANENT_THRESHOLD: mark the incident as "permanent" on the map.
+const REWARD_THRESHOLD = 3;
+const PERMANENT_THRESHOLD = 10;
 
 export const confirm = mutation({
   args: { id: v.id("incidents") },
@@ -131,9 +153,9 @@ export const confirm = mutation({
       updatedAt: now,
     });
 
-    // Auto-verify when the confirmation threshold is crossed
+    // Credit the reporter with a reward once the reward threshold is crossed
     if (
-      newCount >= VERIFICATION_THRESHOLD &&
+      newCount >= REWARD_THRESHOLD &&
       incident.status === "active"
     ) {
       await ctx.db.patch(args.id, {
@@ -147,6 +169,17 @@ export const confirm = mutation({
         userId: incident.userId,
       });
     }
+
+    // Mark as permanent on the map after many verifications
+    if (
+      newCount >= PERMANENT_THRESHOLD &&
+      incident.status !== "permanent"
+    ) {
+      await ctx.db.patch(args.id, {
+        status: "permanent",
+        updatedAt: now,
+      });
+    }
   },
 });
 
@@ -158,6 +191,7 @@ export const updateStatus = mutation({
       v.literal("active"),
       v.literal("resolved"),
       v.literal("verified"),
+      v.literal("permanent"),
     ),
   },
   handler: async (ctx, args) => {

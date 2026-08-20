@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/hooks/use-auth";
@@ -12,9 +12,12 @@ import {
   useMap,
   Polyline,
   CircleMarker,
+  LayersControl,
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { calculateRoutes, searchPlaces, reverseGeocode } from "@/lib/tomtom";
+import type { TomTomRoute } from "@/lib/tomtom";
 import {
   AlertTriangle,
   MapPin,
@@ -193,6 +196,8 @@ function generateRoute(
 
 // ─── Main Component ────────────────────────────────────────────────────
 
+const API_KEY = import.meta.env.VITE_TOMTOM_API_KEY || "";
+
 export default function Dashboard() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
@@ -230,6 +235,19 @@ export default function Dashboard() {
   const [routes, setRoutes] = useState<ReturnType<typeof generateRoute>[]>([]);
   const [isCalculating, setIsCalculating] = useState(false);
 
+  // ── Route search (autocomplete for origin/dest) ──
+  const [routeSearchTarget, setRouteSearchTarget] = useState<"origin" | "dest" | null>(null);
+  const [routeSearchQuery, setRouteSearchQuery] = useState("");
+  const [routeSearchResults, setRouteSearchResults] = useState<any[]>([]);
+  const [isRouteSearching, setIsRouteSearching] = useState(false);
+  const routeSearchTimeout = useRef<ReturnType<typeof setTimeout>>();
+
+  // ── Map search (top bar) ──
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const searchTimeout = useRef<ReturnType<typeof setTimeout>>();
+
   // ── Filters ──
   const [typeFilter, setTypeFilter] = useState<string>("all");
 
@@ -266,6 +284,72 @@ export default function Dashboard() {
     );
   }, []);
 
+  // ─── Place search (TomTom Geocoding) ────────────────────────────────
+  const handleSearch = useCallback(async (query: string) => {
+    setSearchQuery(query);
+    if (query.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    clearTimeout(searchTimeout.current);
+    searchTimeout.current = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const results = await searchPlaces(query, mapCenter[0], mapCenter[1]);
+        setSearchResults(results);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 300);
+  }, [mapCenter]);
+
+  const handleSelectSearchResult = useCallback((result: any) => {
+    setMapCenter([result.lat, result.lng]);
+    setMapZoom(16);
+    setSearchResults([]);
+    setSearchQuery(result.name);
+  }, []);
+
+  // ─── Route place search (origin/dest autocomplete) ──────────────
+  const handleRouteSearch = useCallback((query: string, target: "origin" | "dest") => {
+    setRouteSearchQuery(query);
+    setRouteSearchTarget(target);
+    if (query.length < 2) {
+      setRouteSearchResults([]);
+      return;
+    }
+    clearTimeout(routeSearchTimeout.current);
+    routeSearchTimeout.current = setTimeout(async () => {
+      setIsRouteSearching(true);
+      try {
+        const results = await searchPlaces(query, mapCenter[0], mapCenter[1]);
+        setRouteSearchResults(results);
+      } catch {
+        setRouteSearchResults([]);
+      } finally {
+        setIsRouteSearching(false);
+      }
+    }, 300);
+  }, [mapCenter]);
+
+  const handleSelectRouteResult = useCallback((result: any) => {
+    const coords: [number, number] = [result.lat, result.lng];
+    if (routeSearchTarget === "origin") {
+      setOriginCoords(coords);
+      setOriginLabel(result.name);
+    } else {
+      setDestCoords(coords);
+      setDestLabel(result.name);
+    }
+    setRouteSearchQuery(result.name);
+    setRouteSearchResults([]);
+    setRouteSearchTarget(null);
+    setMapCenter(coords);
+    setMapZoom(14);
+  }, [routeSearchTarget]);
+
   // ─── Map click dispatcher ────────────────────────────────────────────
   const handleReportMapClick = useCallback((lat: number, lng: number) => {
     setReportLocation([lat, lng]);
@@ -275,6 +359,9 @@ export default function Dashboard() {
     setOriginCoords([lat, lng]);
     setOriginLabel(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);
     setMapMode("idle");
+    setRouteSearchTarget(null);
+    setRouteSearchResults([]);
+    reverseGeocode(lat, lng).then((addr) => setOriginLabel(addr)).catch(() => {});
     toast.success("Origin set! Now tap to set destination.");
   }, []);
 
@@ -282,6 +369,9 @@ export default function Dashboard() {
     setDestCoords([lat, lng]);
     setDestLabel(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);
     setMapMode("idle");
+    setRouteSearchTarget(null);
+    setRouteSearchResults([]);
+    reverseGeocode(lat, lng).then((addr) => setDestLabel(addr)).catch(() => {});
     toast.success("Destination set! Click Find Routes.");
   }, []);
 
@@ -328,39 +418,67 @@ export default function Dashboard() {
     }
   };
 
-  // ─── Calculate routes ────────────────────────────────────────────────
+  // ─── Calculate routes (TomTom Directions API) ────────────────────────
   const handleCalculateRoutes = async () => {
     if (!originCoords || !destCoords) {
       toast.error("Set both origin and destination on the map first.");
       return;
     }
     setIsCalculating(true);
-    await new Promise((r) => setTimeout(r, 700));
-
-    const fastest = generateRoute(originCoords, destCoords, "fastest", filteredIncidents.length);
-    const balanced = generateRoute(originCoords, destCoords, "balanced", filteredIncidents.length);
-    const safest = generateRoute(originCoords, destCoords, "safest", filteredIncidents.length);
-
-    setRoutes([fastest, balanced, safest]);
-    setSelectedRoute("balanced");
-
     try {
-      await createSession({
-        type: "route",
-        title: `Route: ${originLabel} → ${destLabel}`,
-        originLat: originCoords[0],
-        originLng: originCoords[1],
-        originName: originLabel,
-        destLat: destCoords[0],
-        destLng: destCoords[1],
-        destName: destLabel,
-        riskScore: balanced.riskScore,
-        travelTime: balanced.travelTime,
-        incidentsNearby: filteredIncidents.length,
-      });
-    } catch { /* best-effort */ }
+      const { fastest, shortest, eco } = await calculateRoutes(originCoords, destCoords);
 
-    setIsCalculating(false);
+      // Convert TomTom routes to our format, adding risk scores based on incidents
+      const incidentCount = filteredIncidents.length;
+      const toRoute = (r: TomTomRoute, riskBase: number) => ({
+        path: r.path,
+        riskScore: Math.min(Math.max(riskBase + incidentCount * 2, 2), 98),
+        travelTime: r.travelTime,
+        distance: r.distance,
+        trafficDelay: r.trafficDelay,
+      });
+
+      setRoutes([
+        toRoute(fastest, 35),
+        toRoute(eco, 18),
+        toRoute(shortest, 5),
+      ]);
+      setSelectedRoute("balanced");
+
+      // Resolve addresses (best-effort, non-blocking)
+      let originAddr = `${originCoords[0].toFixed(5)}, ${originCoords[1].toFixed(5)}`;
+      let destAddr = `${destCoords[0].toFixed(5)}, ${destCoords[1].toFixed(5)}`;
+      try {
+        const [oa, da] = await Promise.all([
+          reverseGeocode(originCoords[0], originCoords[1]).catch(() => originAddr),
+          reverseGeocode(destCoords[0], destCoords[1]).catch(() => destAddr),
+        ]);
+        originAddr = oa;
+        destAddr = da;
+      } catch { /* use coords as fallback */ }
+
+      try {
+        await createSession({
+          type: "route",
+          title: `Route: ${originAddr} → ${destAddr}`,
+          originLat: originCoords[0],
+          originLng: originCoords[1],
+          originName: originAddr,
+          destLat: destCoords[0],
+          destLng: destCoords[1],
+          destName: destAddr,
+          riskScore: routes[1]?.riskScore || 18,
+          travelTime: fastest.travelTime,
+          incidentsNearby: incidentCount,
+        });
+      } catch { /* best-effort */ }
+
+      toast.success(`Routes calculated! ${fastest.distance}, ${fastest.travelTime}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Route calculation failed. Check your TomTom API key.");
+    } finally {
+      setIsCalculating(false);
+    }
   };
 
   // ─── Confirm incident ────────────────────────────────────────────────
@@ -559,22 +677,28 @@ export default function Dashboard() {
                         <div className="relative flex-1">
                           <div className="absolute left-3 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-blue-500" />
                           <Input
-                            readOnly
-                            placeholder="Origin — click to set on map"
-                            value={originLabel}
-                            className="glass pl-8 border-white/30 bg-white/40 cursor-pointer"
-                            onClick={() => {
-                              setMapMode(mapMode === "setOrigin" ? "idle" : "setOrigin");
-                              toast.info("Now tap the map to set origin");
-                            }}
+                            placeholder="Search or tap map for origin"
+                            value={routeSearchTarget === "origin" ? routeSearchQuery : originLabel}
+                            className="glass pl-8 border-white/30 bg-white/40"
+                            onChange={(e) => handleRouteSearch(e.target.value, "origin")}
+                            onFocus={() => { setRouteSearchTarget("origin"); setRouteSearchQuery(originLabel); }}
                           />
+                          {routeSearchTarget === "origin" && routeSearchQuery && !isRouteSearching && (
+                            <button onClick={() => { setRouteSearchQuery(""); setRouteSearchResults([]); setRouteSearchTarget(null); setOriginLabel(""); setOriginCoords(null); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                          )}
+                          {routeSearchTarget === "origin" && isRouteSearching && (
+                            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-muted-foreground" />
+                          )}
                         </div>
                         <Button
                           variant={mapMode === "setOrigin" ? "default" : "outline"}
                           size="icon"
                           className="cursor-pointer glass border-white/30 bg-white/40 flex-shrink-0"
+                          title="Set on map"
                           onClick={() => {
                             setMapMode(mapMode === "setOrigin" ? "idle" : "setOrigin");
+                            setRouteSearchTarget(null);
+                            setRouteSearchResults([]);
                             if (mapMode !== "setOrigin") toast.info("Tap the map to set origin");
                           }}
                         >
@@ -582,33 +706,69 @@ export default function Dashboard() {
                         </Button>
                       </div>
 
+                      {/* Origin autocomplete results */}
+                      {routeSearchTarget === "origin" && routeSearchResults.length > 0 && (
+                        <div className="glass rounded-lg border border-white/30 max-h-32 overflow-y-auto">
+                          {routeSearchResults.map((r) => (
+                            <button key={r.id} onClick={() => handleSelectRouteResult(r)} className="w-full text-left px-3 py-2 hover:bg-white/50 transition-colors cursor-pointer flex items-center gap-2 text-xs">
+                              <CircleDot className="w-3 h-3 text-blue-500 flex-shrink-0" />
+                              <div className="min-w-0">
+                                <p className="font-medium truncate">{r.name}</p>
+                                <p className="text-muted-foreground truncate">{r.address}</p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
                       {/* Destination */}
                       <div className="flex items-center gap-2">
                         <div className="relative flex-1">
                           <div className="absolute left-3 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-violet-500" />
                           <Input
-                            readOnly
-                            placeholder="Destination — click to set on map"
-                            value={destLabel}
-                            className="glass pl-8 border-white/30 bg-white/40 cursor-pointer"
-                            onClick={() => {
-                              setMapMode(mapMode === "setDest" ? "idle" : "setDest");
-                              toast.info("Now tap the map to set destination");
-                            }}
+                            placeholder="Search or tap map for destination"
+                            value={routeSearchTarget === "dest" ? routeSearchQuery : destLabel}
+                            className="glass pl-8 border-white/30 bg-white/40"
+                            onChange={(e) => handleRouteSearch(e.target.value, "dest")}
+                            onFocus={() => { setRouteSearchTarget("dest"); setRouteSearchQuery(destLabel); }}
                           />
+                          {routeSearchTarget === "dest" && routeSearchQuery && !isRouteSearching && (
+                            <button onClick={() => { setRouteSearchQuery(""); setRouteSearchResults([]); setRouteSearchTarget(null); setDestLabel(""); setDestCoords(null); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                          )}
+                          {routeSearchTarget === "dest" && isRouteSearching && (
+                            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-muted-foreground" />
+                          )}
                         </div>
                         <Button
                           variant={mapMode === "setDest" ? "default" : "outline"}
                           size="icon"
                           className="cursor-pointer glass border-white/30 bg-white/40 flex-shrink-0"
+                          title="Set on map"
                           onClick={() => {
                             setMapMode(mapMode === "setDest" ? "idle" : "setDest");
+                            setRouteSearchTarget(null);
+                            setRouteSearchResults([]);
                             if (mapMode !== "setDest") toast.info("Tap the map to set destination");
                           }}
                         >
                           <Target className="w-4 h-4" />
                         </Button>
                       </div>
+
+                      {/* Destination autocomplete results */}
+                      {routeSearchTarget === "dest" && routeSearchResults.length > 0 && (
+                        <div className="glass rounded-lg border border-white/30 max-h-32 overflow-y-auto">
+                          {routeSearchResults.map((r) => (
+                            <button key={r.id} onClick={() => handleSelectRouteResult(r)} className="w-full text-left px-3 py-2 hover:bg-white/50 transition-colors cursor-pointer flex items-center gap-2 text-xs">
+                              <Target className="w-3 h-3 text-violet-500 flex-shrink-0" />
+                              <div className="min-w-0">
+                                <p className="font-medium truncate">{r.name}</p>
+                                <p className="text-muted-foreground truncate">{r.address}</p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     {/* Quick-set from current location */}
@@ -712,10 +872,21 @@ export default function Dashboard() {
             className="h-full w-full"
             zoomControl={false}
           >
+            {/* Base map layer */}
             <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://www.tomtom.com">TomTom</a>'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
+            {/* TomTom Traffic Flow overlay */}
+            {API_KEY && (
+              <TileLayer
+                attribution='&copy; <a href="https://www.tomtom.com">TomTom Traffic</a>'
+                url={`https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}/256/png?key=${API_KEY}`}
+                opacity={0.5}
+                tileSize={256}
+                maxZoom={22}
+              />
+            )}
             <MapClickHandler
               mode={mapMode}
               onReportClick={handleReportMapClick}
@@ -833,8 +1004,47 @@ export default function Dashboard() {
             )}
           </AnimatePresence>
 
+          {/* ── Search bar ──────────────────────────────────────── */}
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] w-full max-w-md px-4">
+            <div className="glass-strong rounded-2xl shadow-lg overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-2.5">
+                <svg className="w-4 h-4 text-muted-foreground flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" cy="21" x2="16.65" y2="16.65"/></svg>
+                <input
+                  type="text"
+                  placeholder="Search places..."
+                  value={searchQuery}
+                  onChange={(e) => handleSearch(e.target.value)}
+                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                />
+                {isSearching && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+                {searchQuery && !isSearching && (
+                  <button onClick={() => { setSearchQuery(""); setSearchResults([]); }} className="text-muted-foreground hover:text-foreground cursor-pointer">
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+              {searchResults.length > 0 && (
+                <div className="border-t border-white/20 max-h-48 overflow-y-auto">
+                  {searchResults.map((r) => (
+                    <button
+                      key={r.id}
+                      onClick={() => handleSelectSearchResult(r)}
+                      className="w-full text-left px-4 py-2.5 hover:bg-white/40 transition-colors cursor-pointer flex items-center gap-2"
+                    >
+                      <MapPin className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{r.name}</p>
+                        <p className="text-xs text-muted-foreground truncate">{r.address}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* ── Map controls (zoom + recenter) ──────────────────── */}
-          <div className="absolute top-4 right-4 z-[1000] flex flex-col gap-2">
+          <div className="absolute top-20 right-4 z-[1000] flex flex-col gap-2">
             <div className="glass-strong rounded-xl overflow-hidden shadow-lg">
               <Button variant="ghost" size="icon" className="w-10 h-10 rounded-none cursor-pointer" onClick={() => setMapZoom((z) => Math.min(z + 1, 18))}>
                 <Plus className="w-4 h-4" />

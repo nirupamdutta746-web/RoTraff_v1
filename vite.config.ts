@@ -77,5 +77,16 @@ export default defineConfig({
     hmr: {
       overlay: false,
     },
+    proxy: {
+      "/tomtom": {
+        target: "https://api.tomtom.com",
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/tomtom/, ""),
+        headers: {
+          Accept: "application/json",
+        },
+      },
+    },
   },
 });

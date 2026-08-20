@@ -1,8 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router";
 import { motion } from "framer-motion";
 import { QRCodeSVG } from "qrcode.react";
-import { useQuery } from "convex/react";
+import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -17,9 +17,11 @@ import {
   XCircle,
   Copy,
   Check,
+  FileCode2,
+  Network,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useState } from "react";
 
 // ── Animated wrapper (matches existing page patterns) ──────────────────────
 
@@ -129,19 +131,48 @@ export default function WalletPage() {
   const navigate = useNavigate();
 
   const wallet = useQuery(api.wallets.getWallet);
-  const balance = useQuery(api.rewards.getBalance);
   const transactions = useQuery(api.rewards.getTransactions);
 
-  const provisionMutation = null; // We'll use the mutation directly
+  const assetInfo = useQuery(api.wallets.getAssetInfo);
+  const provisionWalletMutation = useMutation(api.wallets.provision);
+  const retryRewardMutation = useMutation(api.rewards.forceRetryFailedReward);
+  const getLiveBalanceAction = useAction(api.walletActions.getLiveBalance);
   const [isProvisioning, setIsProvisioning] = useState(false);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [liveBalance, setLiveBalance] = useState<number | null>(null);
+  const [balanceLoading, setBalanceLoading] = useState(true);
+
+  const fetchBalance = useCallback(() => {
+    setBalanceLoading(true);
+    getLiveBalanceAction()
+      .then((b) => setLiveBalance(b))
+      .catch(() => setLiveBalance(0))
+      .finally(() => setBalanceLoading(false));
+  }, [getLiveBalanceAction]);
+
+  // Fetch live on-chain balance when wallet is available
+  useEffect(() => {
+    if (!wallet?.provisioned) {
+      setLiveBalance(0);
+      setBalanceLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setBalanceLoading(true);
+    getLiveBalanceAction()
+      .then((b) => { if (!cancelled) setLiveBalance(b); })
+      .catch(() => { if (!cancelled) setLiveBalance(0); })
+      .finally(() => { if (!cancelled) setBalanceLoading(false); });
+    return () => { cancelled = true; };
+  }, [wallet?.provisioned, getLiveBalanceAction]);
 
   // Precompute display values
   const displayBalance = useMemo(() => {
-    if (balance === undefined) return "...";
-    return balance.toString();
-  }, [balance]);
+    if (balanceLoading) return "...";
+    return (liveBalance ?? 0).toString();
+  }, [liveBalance, balanceLoading]);
 
-  const isLoading = wallet === undefined && user !== null;
+  const isLoading = (wallet === undefined && user !== null) || balanceLoading;
   const hasNoWallet = wallet === null && user !== null;
 
   // Group transactions by date
@@ -180,18 +211,35 @@ export default function WalletPage() {
     return groups;
   }, [transactions]);
 
+  const handleRetryReward = async (transactionId: string) => {
+    setRetryingId(transactionId);
+    try {
+      const result = await retryRewardMutation({ transactionId: transactionId as any });
+      if (result.success) {
+        toast.success("Reward re-queued for processing!");
+        fetchBalance();
+      } else {
+        toast.error(result.error || "Cannot retry this transaction.");
+      }
+    } catch {
+      toast.error("Retry failed.");
+    } finally {
+      setRetryingId(null);
+    }
+  };
+
   const handleProvisionWallet = async () => {
     setIsProvisioning(true);
+    toast.info("Setting up your wallet on Stellar testnet...");
     try {
-      // Call the Convex mutation
-      const { provision } = await import("@/convex/_generated/api");
-      // Note: This is a client-side call to the mutation
-      // The actual mutation is defined in wallets.ts
-      toast.info("Setting up your wallet on Stellar testnet...");
-      // We'll use a dynamic import to call the mutation
-      // For now, we show a message — the wallet is provisioned on first reward
+      const result = await provisionWalletMutation();
+      if (result.alreadyProvisioned) {
+        toast.success("Wallet already set up!");
+      } else {
+        toast.success("Wallet created on Stellar testnet!");
+      }
     } catch (error) {
-      toast.error("Wallet setup will happen automatically when you earn your first reward.");
+      toast.error("Wallet setup failed. It will auto-provision on your first reward.");
     } finally {
       setIsProvisioning(false);
     }
@@ -262,7 +310,7 @@ export default function WalletPage() {
                 cashed out
               </p>
 
-              {hasNoWallet && (
+              {hasNoWallet ? (
                 <div className="mt-5">
                   <Button
                     onClick={handleProvisionWallet}
@@ -282,8 +330,103 @@ export default function WalletPage() {
                     Wallet auto-provisions on your first reward
                   </p>
                 </div>
+              ) : (
+                <button
+                  onClick={fetchBalance}
+                  disabled={balanceLoading}
+                  className="mt-4 text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 mx-auto cursor-pointer transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 ${balanceLoading ? "animate-spin" : ""}`} />
+                  {balanceLoading ? "Refreshing..." : "Refresh on-chain balance"}
+                </button>
               )}
             </div>
+          </div>
+        </AnimatedCard>
+
+        {/* ── Stellar Contract ID ─────────────────────────────────── */}
+        <AnimatedCard delay={0.05}>
+          <div className="glass-card p-6">
+            <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
+              <FileCode2 className="w-4 h-4 text-primary" /> Stellar Asset
+              Contract ID
+            </h3>
+
+            {assetInfo === undefined ? (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+              </div>
+            ) : assetInfo === null ? (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Stellar env vars not configured yet.
+                </p>
+                <p className="text-[10px] text-muted-foreground/60">
+                  Set STELLAR_ISSUING_SECRET in your Convex dashboard to enable the reward system.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {/* Soroban Contract ID (C-address) — primary display */}
+                {assetInfo.sorobanContractId && (
+                  <div className="flex items-center gap-2 glass rounded-xl px-3 py-2.5 border border-emerald-500/20 bg-emerald-500/5">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+                      <FileCode2 className="w-4 h-4 text-emerald-600" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-emerald-600 mb-0.5">
+                        Soroban Contract ID
+                      </p>
+                      <code className="text-sm font-mono font-bold break-all text-foreground select-all">
+                        {assetInfo.sorobanContractId}
+                      </code>
+                    </div>
+                    <CopyButton text={assetInfo.sorobanContractId} />
+                  </div>
+                )}
+
+                {/* Issuing Account */}
+                <div className="flex items-center gap-2 glass rounded-xl px-3 py-2">
+                  <Network className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-0.5">
+                      Issuing Account
+                    </p>
+                    <code className="text-xs font-mono break-all text-foreground select-all">
+                      {assetInfo.issuingPublicKey}
+                    </code>
+                  </div>
+                  <CopyButton text={assetInfo.issuingPublicKey} />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="glass rounded-xl px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-0.5">
+                      Asset Code
+                    </p>
+                    <p className="text-sm font-bold font-mono">
+                      {assetInfo.assetCode}
+                    </p>
+                  </div>
+                  <div className="glass rounded-xl px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-0.5">
+                      Network
+                    </p>
+                    <p className="text-sm font-bold font-mono">Testnet</p>
+                  </div>
+                </div>
+
+                <a
+                  href={`${assetInfo.explorerBaseUrl}/account/${assetInfo.issuingPublicKey}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-primary hover:underline flex items-center gap-1"
+                >
+                  View issuing account on Stellar Explorer
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            )}
           </div>
         </AnimatedCard>
 
@@ -401,6 +544,18 @@ export default function WalletPage() {
                           </div>
 
                           {/* Stellar tx hash link */}
+                          {txn.status === "failed" && (
+                            <button
+                              onClick={() => handleRetryReward(txn._id)}
+                              disabled={retryingId === txn._id}
+                              className="text-[10px] text-amber-600 hover:text-amber-700 font-medium flex items-center gap-1 mt-1.5 ml-12 cursor-pointer disabled:opacity-50"
+                            >
+                              {retryingId === txn._id ? (
+                                <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                              ) : null}
+                              {retryingId === txn._id ? "Retrying..." : "Retry"}
+                            </button>
+                          )}
                           {txn.stellarTransactionHash &&
                             txn.status === "confirmed" && (
                               <a
