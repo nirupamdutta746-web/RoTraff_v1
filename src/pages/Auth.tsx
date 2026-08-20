@@ -131,13 +131,13 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
           >
-            <Card className="min-w-[360px] max-w-[420px] glass-card border-white/30 shadow-xl shadow-blue-500/5">
+            <Card className="min-w-90 max-w-105 glass-card border-white/30 shadow-xl shadow-blue-500/5">
               {step === "signIn" ? (
                 <>
                   <CardHeader className="text-center">
                     <div className="flex justify-center mb-2">
                       <div
-                        className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-xl shadow-blue-500/25 cursor-pointer"
+                        className="w-14 h-14 rounded-2xl bg-linear-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-xl shadow-blue-500/25 cursor-pointer"
                         onClick={() => navigate("/")}
                       >
                         <Shield className="w-7 h-7 text-white" />
@@ -264,7 +264,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     <CardFooter className="flex-col gap-2">
                       <Button
                         type="submit"
-                        className="w-full cursor-pointer bg-gradient-to-r from-blue-500 to-violet-500 text-white border-0 hover:from-blue-600 hover:to-violet-600"
+                        className="w-full cursor-pointer bg-linear-to-r from-blue-500 to-violet-500 text-white border-0 hover:from-blue-600 hover:to-violet-600"
                         disabled={isLoading || otp.length !== 6}
                       >
                         {isLoading ? (
