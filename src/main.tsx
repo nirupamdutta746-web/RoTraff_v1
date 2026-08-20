@@ -49,7 +49,7 @@ class RootErrorBoundary extends React.Component<
         <div className="min-h-screen flex items-center justify-center bg-background text-foreground p-6">
           <div className="max-w-lg text-center">
             <p className="text-sm font-semibold">Runtime error</p>
-            <p className="mt-2 text-xs text-muted-foreground break-words">
+            <p className="mt-2 text-xs text-muted-foreground wrap-break-word">
               {this.state.message}
             </p>
             {this.state.stack && (
