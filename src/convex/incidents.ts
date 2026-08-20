@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation } from "./_generated/server";
+import { api } from "./_generated/api";
 
 // Get all active incidents
 export const list = query({
@@ -106,6 +107,9 @@ export const report = mutation({
 });
 
 // Confirm / upvote an existing incident
+// When reports cross the verification threshold, auto-verify and credit a reward.
+const VERIFICATION_THRESHOLD = 3;
+
 export const confirm = mutation({
   args: { id: v.id("incidents") },
   handler: async (ctx, args) => {
@@ -119,10 +123,30 @@ export const confirm = mutation({
       throw new Error("Incident not found.");
     }
 
+    const newCount = incident.reports + 1;
+    const now = Date.now();
+
     await ctx.db.patch(args.id, {
-      reports: incident.reports + 1,
-      updatedAt: Date.now(),
+      reports: newCount,
+      updatedAt: now,
     });
+
+    // Auto-verify when the confirmation threshold is crossed
+    if (
+      newCount >= VERIFICATION_THRESHOLD &&
+      incident.status === "active"
+    ) {
+      await ctx.db.patch(args.id, {
+        status: "verified",
+        updatedAt: now,
+      });
+
+      // Credit the original reporter with a reward (idempotent — won't double-pay)
+      await ctx.runMutation(api.rewards.creditReport, {
+        incidentId: args.id,
+        userId: incident.userId,
+      });
+    }
   },
 });
 

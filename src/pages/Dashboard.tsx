@@ -41,6 +41,7 @@ import {
   Locate,
   CircleDot,
   Target,
+  Wallet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,6 +54,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { useRewardToast } from "@/hooks/use-reward-toast";
 
 // ─── Marker icon factory ───────────────────────────────────────────────
 function createIncidentIcon(type: string) {
@@ -198,6 +200,8 @@ export default function Dashboard() {
   const reportIncident = useMutation(api.incidents.report);
   const confirmIncident = useMutation(api.incidents.confirm);
   const createSession = useMutation(api.sessions.create);
+  const rewardBalance = useQuery(api.rewards.getBalance);
+  useRewardToast();
 
   // ── Map state ──
   const [mapCenter, setMapCenter] = useState<[number, number]>([20, 0]);
@@ -434,6 +438,21 @@ export default function Dashboard() {
             <span className="hidden lg:inline">Routes</span>
           </Button>
           <div className="w-px h-6 bg-border mx-1 hidden sm:block" />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="cursor-pointer gap-1.5"
+            onClick={() => navigate("/wallet")}
+          >
+            <Wallet className="w-4 h-4" />
+            {rewardBalance !== undefined && rewardBalance > 0 ? (
+              <span className="text-xs font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">
+                {rewardBalance} ROTR
+              </span>
+            ) : (
+              <span className="hidden lg:inline">Wallet</span>
+            )}
+          </Button>
           <Button variant="ghost" size="icon" className="cursor-pointer" onClick={() => navigate("/sessions")}>
             <History className="w-4 h-4" />
           </Button>

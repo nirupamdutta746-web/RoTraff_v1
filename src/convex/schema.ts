@@ -117,6 +117,43 @@ const schema = defineSchema(
     })
       .index("by_user", ["userId"])
       .index("by_created", ["createdAt"]),
+
+    // Stellar wallet — custodial, one per user
+    // stellarSecretKeyEncrypted is AES-256-GCM encrypted using STELLAR_KEY_ENCRYPTION_SECRET env var.
+    // It is NEVER returned by any query — enforced by omitting from query return shapes.
+    wallets: defineTable({
+      userId: v.id("users"),
+      stellarPublicKey: v.string(),
+      stellarSecretKeyEncrypted: v.string(),
+      provisionedAt: v.optional(v.number()),
+      status: v.union(v.literal("active"), v.literal("suspended")),
+    }).index("by_user", ["userId"]),
+
+    // Append-only reward ledger — every row is an audit trail entry.
+    // NEVER update or delete a row — this is a financial record.
+    rewardTransactions: defineTable({
+      userId: v.id("users"),
+      incidentId: v.optional(v.id("incidents")),
+      amount: v.number(),
+      reason: v.union(
+        v.literal("report_verified"),
+        v.literal("verification_participation"),
+        v.literal("manual_adjustment"),
+      ),
+      stellarTransactionHash: v.string(),
+      status: v.union(
+        v.literal("pending"),
+        v.literal("submitted"),
+        v.literal("confirmed"),
+        v.literal("failed"),
+      ),
+      createdAt: v.number(),
+      confirmedAt: v.optional(v.number()),
+      retryCount: v.optional(v.number()),
+    })
+      .index("by_user", ["userId"])
+      .index("by_incident", ["incidentId", "reason"])
+      .index("by_status", ["status"]),
   },
   {
     schemaValidation: false,

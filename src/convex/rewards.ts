@@ -1,0 +1,198 @@
+import { v } from "convex/values";
+import { getAuthUserId } from "@convex-dev/auth/server";
+import { query, mutation } from "./_generated/server";
+import { api } from "./_generated/api";
+
+/**
+ * Reward amount per verified report (named constant, trivially tunable).
+ */
+const REPORT_VERIFIED_REWARD = 5;
+
+// ── Queries ──────────────────────────────────────────────────────────────
+
+/**
+ * Get the current user's reward transaction history.
+ * Ordered newest-first. This is the audit trail — never update or delete rows.
+ */
+export const getTransactions = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return [];
+
+    const txns = await ctx.db
+      .query("rewardTransactions")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .order("desc")
+      .collect();
+
+    return txns.map((t) => ({
+      _id: t._id,
+      amount: t.amount,
+      reason: t.reason,
+      status: t.status,
+      stellarTransactionHash: t.stellarTransactionHash,
+      incidentId: t.incidentId,
+      createdAt: t.createdAt,
+      confirmedAt: t.confirmedAt,
+    }));
+  },
+});
+
+/**
+ * Get total confirmed ROTR balance for the current user.
+ * Sums all confirmed rewardTransactions for the user.
+ */
+export const getBalance = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return 0;
+
+    const txns = await ctx.db
+      .query("rewardTransactions")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+
+    return txns
+      .filter((t) => t.status === "confirmed")
+      .reduce((sum, t) => sum + t.amount, 0);
+  },
+});
+
+// ── Mutations ────────────────────────────────────────────────────────────
+
+/**
+ * Credit a reward for a verified incident report.
+ * Called from the incident confirm mutation when the threshold is crossed.
+ *
+ * Idempotency: checks rewardTransactions for existing (incidentId, reason) pair.
+ * If a row already exists for this incident + reason, returns without creating a duplicate.
+ *
+ * Flow:
+ * 1. Idempotency check — skip if already credited for this incident
+ * 2. Ensure user has a wallet (provision if needed)
+ * 3. Write reward row with status "pending" synchronously (audit trail exists immediately)
+ * 4. Schedule the actual Stellar payment via processPendingReward action
+ */
+export const creditReport = mutation({
+  args: {
+    incidentId: v.id("incidents"),
+    userId: v.id("users"),
+  },
+  handler: async (ctx, args) => {
+    // Idempotency: one payout per incident per reason
+    const existing = await ctx.db
+      .query("rewardTransactions")
+      .withIndex("by_incident", (q) =>
+        q.eq("incidentId", args.incidentId).eq("reason", "report_verified"),
+      )
+      .unique();
+    if (existing) return { credited: false, reason: "already_credited" };
+
+    // Ensure user has a Stellar wallet — provision lazily on first reward
+    const wallet = await ctx.db
+      .query("wallets")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .unique();
+
+    if (!wallet) {
+      // Provision inline (synchronous within this mutation is fine for first time)
+      const { provisionWallet } = await import("../lib/stellar");
+      const result = await provisionWallet();
+      await ctx.db.insert("wallets", {
+        userId: args.userId,
+        stellarPublicKey: result.publicKey,
+        stellarSecretKeyEncrypted: result.secretKeyEncrypted,
+        provisionedAt: Date.now(),
+        status: "active",
+      });
+    }
+
+    // Write the pending reward row — audit trail exists immediately
+    const txId = await ctx.db.insert("rewardTransactions", {
+      userId: args.userId,
+      incidentId: args.incidentId,
+      amount: REPORT_VERIFIED_REWARD,
+      reason: "report_verified",
+      stellarTransactionHash: "", // filled in after Stellar payment
+      status: "pending",
+      createdAt: Date.now(),
+    });
+
+    // Schedule the actual Stellar payment (non-blocking)
+    // References action in separate file to avoid circular type inference
+    await ctx.scheduler.runAfter(0, api.rewardActions.processPendingReward, {
+      rewardTransactionId: txId,
+    });
+
+    return { credited: true, amount: REPORT_VERIFIED_REWARD, txId };
+  },
+});
+
+// ── Internal helpers (called by actions via ctx.runQuery/ctx.runMutation) ─
+
+/**
+ * Get a single reward transaction by ID (internal use only).
+ */
+export const getTransactionById = query({
+  args: { transactionId: v.id("rewardTransactions") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.transactionId);
+  },
+});
+
+/**
+ * Update a reward transaction's status and increment retry count.
+ * Only used internally by processPendingReward action.
+ */
+export const updateRewardStatus = mutation({
+  args: {
+    transactionId: v.id("rewardTransactions"),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("submitted"),
+      v.literal("confirmed"),
+      v.literal("failed"),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.get(args.transactionId);
+    const retryCount = existing?.retryCount ?? 0;
+    await ctx.db.patch(args.transactionId, {
+      status: args.status,
+      retryCount: retryCount + 1,
+    });
+  },
+});
+
+/**
+ * Confirm a reward — set status to "confirmed" with the tx hash and timestamp.
+ */
+export const confirmReward = mutation({
+  args: {
+    transactionId: v.id("rewardTransactions"),
+    stellarTransactionHash: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.transactionId, {
+      status: "confirmed",
+      stellarTransactionHash: args.stellarTransactionHash,
+      confirmedAt: Date.now(),
+    });
+  },
+});
+
+/**
+ * Get all pending reward transactions (for batch processing).
+ */
+export const getPendingTransactions = query({
+  args: {},
+  handler: async (ctx) => {
+    const pending = await ctx.db
+      .query("rewardTransactions")
+      .withIndex("by_status", (q) => q.eq("status", "pending"))
+      .collect();
+    return pending.filter((t) => (t.retryCount ?? 0) < 3);
+  },
+});
