@@ -141,13 +141,39 @@ export const confirm = mutation({
       throw new Error("You must be signed in to confirm an incident.");
     }
 
+    // Block anonymous/guest users from verifying incidents
+    const user = await ctx.db.get(userId);
+    if (user?.isAnonymous) {
+      throw new Error("Guest accounts cannot verify incidents. Please sign in with your email to verify.");
+    }
+
     const incident = await ctx.db.get(args.id);
     if (!incident) {
       throw new Error("Incident not found.");
     }
 
-    const newCount = incident.reports + 1;
+    // Check if user already verified this incident
+    const existingVerification = await ctx.db
+      .query("incidentVerifications")
+      .withIndex("by_user_incident", (q) =>
+        q.eq("userId", userId).eq("incidentId", args.id),
+      )
+      .unique();
+
+    if (existingVerification) {
+      throw new Error("You can only verify an incident once.");
+    }
+
     const now = Date.now();
+
+    // Record the verification
+    await ctx.db.insert("incidentVerifications", {
+      userId,
+      incidentId: args.id,
+      createdAt: now,
+    });
+
+    const newCount = incident.reports + 1;
 
     await ctx.db.patch(args.id, {
       reports: newCount,

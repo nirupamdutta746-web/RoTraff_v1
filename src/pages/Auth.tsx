@@ -248,12 +248,12 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                 <>
                   <CardHeader className="text-center">
                     <div className="flex justify-center mb-2">
-                      <div
-                        className="w-14 h-14 rounded-2xl bg-linear-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-xl shadow-blue-500/25 cursor-pointer"
+                      <img
+                        src="/logo.png"
+                        alt="RoTraff"
+                        className="w-14 h-14 rounded-2xl shadow-xl shadow-blue-500/25 cursor-pointer object-cover"
                         onClick={() => navigate("/")}
-                      >
-                        <Shield className="w-7 h-7 text-white" />
-                      </div>
+                      />
                     </div>
                     <CardTitle className="text-xl">Welcome to RoTraff</CardTitle>
                     <CardDescription>

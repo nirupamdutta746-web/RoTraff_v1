@@ -169,9 +169,7 @@ export default function Landing() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-4">
           <div className="glass-strong rounded-2xl px-6 py-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
-                <Shield className="w-5 h-5 text-white" />
-              </div>
+              <img src="/logo.png" alt="RoTraff" className="w-9 h-9 rounded-xl shadow-lg shadow-blue-500/20 object-cover" />
               <span className="text-lg font-bold tracking-tight text-foreground">
                 RoTraff
               </span>
@@ -665,9 +663,7 @@ export default function Landing() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center">
-                <Shield className="w-4 h-4 text-white" />
-              </div>
+              <img src="/logo.png" alt="RoTraff" className="w-8 h-8 rounded-lg object-cover" />
               <span className="font-bold text-foreground">RoTraff</span>
             </div>
             <p className="text-sm text-muted-foreground">
