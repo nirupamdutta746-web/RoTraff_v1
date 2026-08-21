@@ -1460,7 +1460,7 @@ export default function Dashboard() {
           </div>
 
           {/* ── Report FAB ──────────────────────────────────────── */}
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="absolute bottom-4 right-4 z-1000">
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="absolute bottom-4 right-4 sm:bottom-4 z-1000" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
             <Button
               onClick={() => {
                 const opening = !showReportPanel;
@@ -1468,13 +1468,13 @@ export default function Dashboard() {
                 setMapMode(opening ? "reporting" : "idle");
                 if (!opening) setReportLocation(null);
               }}
-              className={`cursor-pointer rounded-2xl px-5 py-6 shadow-xl font-semibold gap-2 ${
+              className={`cursor-pointer rounded-2xl px-4 py-4 sm:px-5 sm:py-6 shadow-xl font-semibold gap-2 text-sm sm:text-base ${
                 showReportPanel
                   ? "bg-white text-foreground border border-border hover:bg-white/90"
                   : "bg-linear-to-r from-blue-500 to-violet-500 text-white border-0 hover:from-blue-600 hover:to-violet-600 shadow-blue-500/25"
               }`}
             >
-              {showReportPanel ? <><X className="w-5 h-5" /> Close</> : <><Plus className="w-5 h-5" /> Report Incident</>}
+              {showReportPanel ? <><X className="w-5 h-5" /> Close</> : <><Plus className="w-5 h-5" /> <span className="hidden sm:inline">Report Incident</span><span className="sm:hidden">Report</span></>}
             </Button>
           </motion.div>
         </div>
