@@ -8,6 +8,16 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
   ArrowLeft,
   Wallet,
   Gift,
@@ -21,6 +31,9 @@ import {
   FileCode2,
   Network,
   RefreshCw,
+  Eye,
+  EyeOff,
+  Lock,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -128,7 +141,7 @@ function CopyButton({ text }: { text: string }) {
 // ── Main Component ─────────────────────────────────────────────────────────
 
 export default function WalletPage() {
-  const { user } = useAuth();
+  const { user, signIn } = useAuth();
   const navigate = useNavigate();
 
   const wallet = useQuery(api.wallets.getWallet);
@@ -142,6 +155,46 @@ export default function WalletPage() {
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [liveBalance, setLiveBalance] = useState<number | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(true);
+  const [showCredentials, setShowCredentials] = useState(false);
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
+  const [verifyPassword, setVerifyPassword] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+
+  const handlePasswordVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!verifyPassword || !user?.email) return;
+    setVerifying(true);
+    setVerifyError(null);
+    try {
+      await signIn("password", {
+        flow: "signIn",
+        email: user.email,
+        password: verifyPassword,
+      });
+      setShowCredentials(true);
+      setPasswordDialogOpen(false);
+      setVerifyPassword("");
+    } catch (err) {
+      setVerifyError(
+        err instanceof Error
+          ? err.message
+          : "Incorrect password. Please try again."
+      );
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const handleShowClick = () => {
+    if (showCredentials) {
+      setShowCredentials(false);
+    } else {
+      setPasswordDialogOpen(true);
+      setVerifyPassword("");
+      setVerifyError(null);
+    }
+  };
 
   const fetchBalance = useCallback(() => {
     setBalanceLoading(true);
@@ -349,10 +402,21 @@ export default function WalletPage() {
         {/* ── Stellar Contract ID ─────────────────────────────────── */}
         <AnimatedCard delay={0.05}>
           <div className="glass-card p-6">
-            <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
-              <FileCode2 className="w-4 h-4 text-primary" /> Stellar Asset
-              Contract ID
-            </h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold flex items-center gap-2">
+                <FileCode2 className="w-4 h-4 text-primary" /> Stellar Asset
+                Contract ID
+              </h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="cursor-pointer gap-1.5 text-xs"
+                onClick={handleShowClick}
+              >
+                {showCredentials ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                {showCredentials ? "Hide" : "Show"}
+              </Button>
+            </div>
 
             {assetInfo === undefined ? (
               <div className="flex items-center justify-center py-4">
@@ -379,11 +443,11 @@ export default function WalletPage() {
                       <p className="text-[10px] font-semibold uppercase tracking-widest text-emerald-600 mb-0.5">
                         Soroban Contract ID
                       </p>
-                      <code className="text-sm font-mono font-bold break-all text-foreground select-all">
+                      <code className={`text-sm font-mono font-bold break-all transition-all ${!showCredentials ? 'blur-sm select-none pointer-events-none' : 'text-foreground select-all'}`} title={!showCredentials ? 'Enter your password to reveal' : ''}>
                         {assetInfo.sorobanContractId}
                       </code>
                     </div>
-                    <CopyButton text={assetInfo.sorobanContractId} />
+                    {showCredentials && <CopyButton text={assetInfo.sorobanContractId} />}
                   </div>
                 )}
 
@@ -394,11 +458,11 @@ export default function WalletPage() {
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-0.5">
                       Issuing Account
                     </p>
-                    <code className="text-xs font-mono break-all text-foreground select-all">
+                    <code className={`text-xs font-mono break-all transition-all ${!showCredentials ? 'blur-sm select-none pointer-events-none' : 'text-foreground select-all'}`} title={!showCredentials ? 'Enter your password to reveal' : ''}>
                       {assetInfo.issuingPublicKey}
                     </code>
                   </div>
-                  <CopyButton text={assetInfo.issuingPublicKey} />
+                  {showCredentials && <CopyButton text={assetInfo.issuingPublicKey} />}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -406,7 +470,7 @@ export default function WalletPage() {
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-0.5">
                       Asset Code
                     </p>
-                    <p className="text-sm font-bold font-mono">
+                    <p className={`text-sm font-bold font-mono transition-all ${!showCredentials ? 'blur-sm select-none pointer-events-none' : ''}`} title={!showCredentials ? 'Enter your password to reveal' : ''}>
                       {assetInfo.assetCode}
                     </p>
                   </div>
@@ -591,6 +655,64 @@ export default function WalletPage() {
           </div>
         </AnimatedCard>
       </div>
+
+      {/* ── Password Verification Dialog ──────────────────────── */}
+      <Dialog open={passwordDialogOpen} onOpenChange={setPasswordDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Lock className="w-5 h-5 text-primary" />
+              Verify Your Password
+            </DialogTitle>
+            <DialogDescription>
+              Enter your account password to reveal wallet credentials.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handlePasswordVerify} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="verify-password">Password</Label>
+              <Input
+                id="verify-password"
+                type="password"
+                placeholder="Enter your account password"
+                value={verifyPassword}
+                onChange={(e) => {
+                  setVerifyPassword(e.target.value);
+                  setVerifyError(null);
+                }}
+                autoFocus
+                disabled={verifying}
+              />
+              {verifyError && (
+                <p className="text-xs text-red-500 mt-1">{verifyError}</p>
+              )}
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setPasswordDialogOpen(false)}
+                disabled={verifying}
+                className="cursor-pointer"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={!verifyPassword || verifying}
+                className="cursor-pointer bg-gradient-to-r from-blue-500 to-violet-500 text-white border-0 hover:from-blue-600 hover:to-violet-600"
+              >
+                {verifying ? (
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                ) : (
+                  <Eye className="w-4 h-4 mr-2" />
+                )}
+                {verifying ? "Verifying..." : "Reveal Credentials"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

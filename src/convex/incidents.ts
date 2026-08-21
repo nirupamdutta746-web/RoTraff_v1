@@ -285,6 +285,52 @@ export const adminRemove = mutation({
   },
 });
 
+// Downvote an incident (authenticated users only, one per user)
+export const downvote = mutation({
+  args: { id: v.id("incidents") },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      throw new Error("You must be signed in to downvote an incident.");
+    }
+    const user = await ctx.db.get(userId);
+    if (user?.isAnonymous) {
+      throw new Error("Guest accounts cannot downvote incidents.");
+    }
+    const incident = await ctx.db.get(args.id);
+    if (!incident) {
+      throw new Error("Incident not found.");
+    }
+
+    // Check if user already downvoted this incident
+    const existingDownvote = await ctx.db
+      .query("incidentDownvotes")
+      .withIndex("by_user_incident", (q) =>
+        q.eq("userId", userId).eq("incidentId", args.id),
+      )
+      .unique();
+
+    if (existingDownvote) {
+      throw new Error("You can only downvote an incident once.");
+    }
+
+    const now = Date.now();
+
+    // Record the downvote
+    await ctx.db.insert("incidentDownvotes", {
+      userId,
+      incidentId: args.id,
+      createdAt: now,
+    });
+
+    const currentDownvotes = incident.downvotes || 0;
+    await ctx.db.patch(args.id, {
+      downvotes: currentDownvotes + 1,
+      updatedAt: now,
+    });
+  },
+});
+
 // Admin: list ALL incidents including resolved
 export const adminListAll = query({
   args: {},

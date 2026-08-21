@@ -250,6 +250,56 @@
   background: rgba(255, 255, 255, 0.85) !important;
 }
 
+.dark .leaflet-popup-content-wrapper {
+  background: rgba(30, 30, 40, 0.9) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #e5e7eb !important;
+}
+
+.dark .leaflet-popup-tip {
+  background: rgba(30, 30, 40, 0.9) !important;
+}
+
+.dark .leaflet-popup-close-button {
+  color: #9ca3af !important;
+}
+
+/* Unified incident card marker (replaces popup) */
+.incident-card-marker {
+  background: none !important;
+  border: none !important;
+}
+
+.incident-card-marker > div {
+  animation: card-appear 0.2s ease-out;
+}
+
+.dark .incident-card-marker > div {
+  background: rgba(30, 30, 40, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: #e5e7eb !important;
+}
+
+.dark .incident-card-marker span,
+.dark .incident-card-marker p {
+  color: #d1d5db !important;
+}
+
+.dark .incident-card-marker button[data-action] {
+  color: inherit !important;
+}
+
+@keyframes card-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
 /* Scroll animations */
 @keyframes fade-up {
   from {

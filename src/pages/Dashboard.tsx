@@ -12,7 +12,6 @@ import {
   useMap,
   Polyline,
   CircleMarker,
-  LayersControl,
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -46,6 +45,8 @@ import {
   CircleDot,
   Target,
   Wallet,
+  Users,
+  Navigation2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -112,6 +113,78 @@ const typeLabels: Record<string, string> = {
   other: "Other Hazard",
 };
 
+// ─── Haversine distance (meters) ─────────────────────────────────────
+function haversineDistance(
+  lat1: number, lng1: number,
+  lat2: number, lng2: number,
+): number {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ─── Cluster incidents within 20m ─────────────────────────────────────
+function clusterIncidents(
+  incidents: any[],
+  radiusMeters = 50,
+): { lat: number; lng: number; incidents: any[] }[] {
+  const clusters: { lat: number; lng: number; incidents: any[] }[] = [];
+  const used = new Set<string>();
+  for (const inc of incidents) {
+    if (used.has(inc._id)) continue;
+    const cluster = [inc];
+    used.add(inc._id);
+    for (const other of incidents) {
+      if (used.has(other._id)) continue;
+      const dist = haversineDistance(inc.lat, inc.lng, other.lat, other.lng);
+      if (dist <= radiusMeters) {
+        cluster.push(other);
+        used.add(other._id);
+      }
+    }
+    clusters.push({
+      lat: cluster.reduce((s, c) => s + c.lat, 0) / cluster.length,
+      lng: cluster.reduce((s, c) => s + c.lng, 0) / cluster.length,
+      incidents: cluster,
+    });
+  }
+  return clusters;
+}
+
+// ─── Cluster icon factory ─────────────────────────────────────────────
+function createClusterIcon(count: number, type: string) {
+  const colorMap: Record<string, string> = {
+    pothole: "#eab308", landslide: "#a16207", accident: "#ef4444",
+    flood: "#3b82f6", construction: "#f97316", debris: "#8b5cf6",
+    ice: "#06b6d4", other: "#6b7280",
+  };
+  const color = colorMap[type] || "#6b7280";
+  const size = count === 1 ? 32 : Math.min(32 + count * 3, 52);
+  if (count === 1) {
+    return L.divIcon({
+      className: "custom-marker",
+      html: `<div style="width:32px;height:32px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px ${color}44;border:2.5px solid white">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </div>`,
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
+    });
+  }
+  return L.divIcon({
+    className: "cluster-marker",
+    html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:13px;box-shadow:0 4px 16px ${color}55;border:2.5px solid white">
+      ${count}
+    </div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+}
+
+// ─── Reverse-geocoded location label ─────────────────────────────────
 // ─── Map interaction helpers ───────────────────────────────────────────
 
 // Click handler dispatches to whatever map mode is active
@@ -120,14 +193,17 @@ function MapClickHandler({
   onReportClick,
   onOriginClick,
   onDestClick,
+  onMapClick,
 }: {
   mode: "idle" | "reporting" | "setOrigin" | "setDest";
   onReportClick: (lat: number, lng: number) => void;
   onOriginClick: (lat: number, lng: number) => void;
   onDestClick: (lat: number, lng: number) => void;
+  onMapClick: () => void;
 }) {
   useMapEvents({
     click(e) {
+      onMapClick();
       const { lat, lng } = e.latlng;
       if (mode === "reporting") onReportClick(lat, lng);
       else if (mode === "setOrigin") onOriginClick(lat, lng);
@@ -210,6 +286,10 @@ export default function Dashboard() {
   const isAdmin = useQuery(api.users.isAdmin);
   useRewardToast();
 
+  // ── Expanded incident (card replaces marker) ──
+  const [expandedClusterIndex, setExpandedClusterIndex] = useState<number | null>(null);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+
   // ── Map state ──
   const [mapCenter, setMapCenter] = useState<[number, number]>([20, 0]);
   const [mapZoom, setMapZoom] = useState(3);
@@ -240,6 +320,8 @@ export default function Dashboard() {
 
   // ── Image upload state ──
   const [reportImage, setReportImage] = useState<string | null>(null);
+  const [reportLocationName, setReportLocationName] = useState<string>("");
+  const downvoteIncident = useMutation(api.incidents.downvote);
 
   // ── Route search (autocomplete for origin/dest) ──
   const [routeSearchTarget, setRouteSearchTarget] = useState<"origin" | "dest" | null>(null);
@@ -256,9 +338,12 @@ export default function Dashboard() {
 
   // ── Filters ──
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [userPosition, setUserPosition] = useState<[number, number] | null>(null);
+  const [isTracking, setIsTracking] = useState(false);
+  const watchIdRef = useRef<number | null>(null);
 
   // ── Sidebar ──
-  const [sidebarTab, setSidebarTab] = useState<"incidents" | "routes">("incidents");
+  const [sidebarTab, setSidebarTab] = useState<"incidents" | "routes">("routes");
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
     if (typeof window !== "undefined") return window.innerWidth >= 768;
     return true;
@@ -367,6 +452,8 @@ export default function Dashboard() {
   // ─── Map click dispatcher ────────────────────────────────────────────
   const handleReportMapClick = useCallback((lat: number, lng: number) => {
     setReportLocation([lat, lng]);
+    setReportLocationName("");
+    reverseGeocode(lat, lng).then((addr) => setReportLocationName(addr)).catch(() => setReportLocationName(""));
   }, []);
 
   const handleOriginMapClick = useCallback((lat: number, lng: number) => {
@@ -529,6 +616,182 @@ export default function Dashboard() {
     }
   };
 
+  const handleDownvoteIncident = async (id: string) => {
+    try {
+      await downvoteIncident({ id: id as any });
+      toast.success("Incident downvoted.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to downvote.");
+    }
+  };
+
+  // ─── Live user position tracking ────────────────────────────────────
+  const toggleTracking = useCallback(() => {
+    if (isTracking) {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+      setIsTracking(false);
+      toast.info("Location tracking stopped");
+    } else {
+      if (!navigator.geolocation) { toast.error("Geolocation not supported"); return; }
+      const id = navigator.geolocation.watchPosition(
+        (pos) => {
+          const c: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+          setUserPosition(c);
+          if (!hasLocation) { setMapCenter(c); setMapZoom(14); setHasLocation(true); }
+        },
+        () => { toast.error("Location tracking error"); },
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 },
+      );
+      watchIdRef.current = id;
+      setIsTracking(true);
+      toast.success("Location tracking enabled");
+    }
+  }, [isTracking, hasLocation]);
+
+  // Cleanup tracking on unmount
+  useEffect(() => {
+    return () => { if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current); };
+  }, []);
+
+  // ─── Clustered incident data ─────────────────────────────────────────
+  const clusters = useMemo(() => clusterIncidents(filteredIncidents, 50), [filteredIncidents]);
+
+  // ─── Batch reverse-geocode visible incidents to get place names ───
+  const [locationNames, setLocationNames] = useState<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    if (!filteredIncidents || filteredIncidents.length === 0) return;
+    let cancelled = false;
+
+    // Collect unique coordinates to avoid duplicate geocode calls
+    const seen = new Set<string>();
+    const toGeocode: { id: string; lat: number; lng: number }[] = [];
+    for (const inc of filteredIncidents) {
+      const key = `${inc.lat.toFixed(5)},${inc.lng.toFixed(5)}`;
+      if (seen.has(key)) {
+        // Re-use name from a previous incident at same coords
+        const existing = toGeocode.find((g) => `${g.lat.toFixed(5)},${g.lng.toFixed(5)}` === key);
+        if (existing) {
+          setLocationNames((prev) => {
+            const next = new Map(prev);
+            next.set(inc._id, prev.get(existing.id) || "");
+            return next;
+          });
+        }
+        continue;
+      }
+      seen.add(key);
+      toGeocode.push({ id: inc._id, lat: inc.lat, lng: inc.lng });
+    }
+
+    // Geocode in batches of 5 to avoid rate limits
+    const batchSize = 5;
+    const runBatch = async (startIdx: number) => {
+      const batch = toGeocode.slice(startIdx, startIdx + batchSize);
+      if (batch.length === 0) return;
+
+      const results = await Promise.allSettled(
+        batch.map((g) => reverseGeocode(g.lat, g.lng))
+      );
+
+      if (cancelled) return;
+
+      setLocationNames((prev) => {
+        const next = new Map(prev);
+        batch.forEach((g, i) => {
+          const result = results[i];
+          if (result.status === "fulfilled" && result.value) {
+            next.set(g.id, result.value);
+          }
+        });
+        return next;
+      });
+
+      if (startIdx + batchSize < toGeocode.length) {
+        await new Promise((r) => setTimeout(r, 200)); // small delay between batches
+        await runBatch(startIdx + batchSize);
+      }
+    };
+
+    runBatch(0);
+    return () => { cancelled = true; };
+  }, [filteredIncidents]);
+
+  // ─── Event delegation for incident card buttons on the map ─────
+  useEffect(() => {
+    const container = mapContainerRef.current;
+    if (!container) return;
+
+    const handleClick = (e: Event) => {
+      const target = (e.target as HTMLElement).closest('[data-action]') as HTMLElement | null;
+      if (!target) return;
+      e.stopPropagation();
+
+      const action = target.dataset.action;
+      const id = target.dataset.incidentId;
+      if (!action || !id) return;
+
+      if (action === "confirm") {
+        handleConfirmIncident(id);
+      } else if (action === "downvote") {
+        handleDownvoteIncident(id);
+      }
+    };
+
+    container.addEventListener("click", handleClick, true);
+    return () => container.removeEventListener("click", handleClick, true);
+  }, [handleConfirmIncident, handleDownvoteIncident]);
+
+  // ─── Build incident card HTML string for DivIcon ─────────────────────
+  const buildIncidentCardHTML = useCallback((inc: any, color: string, reportCount: number, downvoteCount: number, placeName?: string) => {
+    const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(inc.reportedBy || "U")}&backgroundColor=3b82f6&textColor=ffffff&fontSize=40`;
+    return `
+      <div style="width:320px;max-height:420px;overflow-y:auto;border-radius:12px;background:rgba(255,255,255,0.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.5);box-shadow:0 8px 40px rgba(0,0,0,0.12),0 2px 8px rgba(0,0,0,0.06);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1a1a2e">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px 10px">
+          <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
+            <div style="width:36px;height:36px;border-radius:10px;background:${color}15;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </div>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:6px">
+                <span style="font-weight:700;font-size:13px">${typeLabels[inc.type] || inc.type}</span>
+                <span style="font-size:9px;padding:2px 7px;border-radius:9999px;font-weight:600;border:1px solid ${color}22;background:${color}10;color:${color}">${inc.severity}</span>
+              </div>
+              <p style="font-size:10px;color:#6b7280;margin:1px 0 0">by ${inc.reportedBy || "Unknown"}</p>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:3px">
+            <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;background:#e5e7eb;flex-shrink:0;border:2px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.1)">
+              <img src="${avatarUrl}" width="36" height="36" style="display:block" />
+            </div>
+            <div style="width:28px;height:28px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;flex-shrink:0;border:2px solid white;box-shadow:0 2px 8px ${color}44">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 2a8 8 0 0 1 8 8.2c0 7.3-8 11.8-8 11.8z"/><circle cx="12" cy="10" r="3"/></svg>
+            </div>
+          </div>
+        </div>
+        <div style="padding:0 14px 10px">
+          <div style="display:flex;align-items:center;gap:5px;font-size:10px;color:#6b7280">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+            <span>${placeName || `${inc.lat?.toFixed(4) || ""}, ${inc.lng?.toFixed(4) || ""}`}</span>
+          </div>
+        </div>
+        ${inc.imageUrl ? `<div style="padding:0 14px 10px"><img src="${inc.imageUrl}" style="width:100%;height:110px;object-fit:cover;border-radius:10px;border:2px solid ${color}44" /></div>` : ""}
+        <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-top:1px solid rgba(0,0,0,0.06)">
+          <button data-action="confirm" data-incident-id="${inc._id}" style="display:flex;align-items:center;gap:4px;font-size:12px;font-weight:700;color:#059669;background:none;border:none;padding:6px 10px;border-radius:8px;cursor:pointer;transition:background 0.15s">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            <span>${reportCount}</span>
+          </button>
+          <button data-action="downvote" data-incident-id="${inc._id}" style="display:flex;align-items:center;gap:4px;font-size:12px;font-weight:700;color:#ef4444;background:none;border:none;padding:6px 10px;border-radius:8px;cursor:pointer;transition:background 0.15s">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.77"/><path d="m19 18 2 2-4 4"/></svg>
+            <span>${downvoteCount}</span>
+          </button>
+        </div>
+      </div>`;
+  }, []);
+
   // ─── Sign out ────────────────────────────────────────────────────────
   const handleSignOut = async () => {
     await signOut();
@@ -574,18 +837,9 @@ export default function Dashboard() {
 
         <div className="flex items-center gap-2">
           <Button
-            variant={sidebarTab === "incidents" && isSidebarOpen ? "default" : "ghost"}
+            variant={isSidebarOpen ? "default" : "ghost"}
             size="sm"
-            onClick={() => { setSidebarTab("incidents"); setIsSidebarOpen(true); }}
-            className="cursor-pointer gap-1.5 hidden sm:flex"
-          >
-            <AlertTriangle className="w-4 h-4" />
-            <span className="hidden lg:inline">Incidents</span>
-          </Button>
-          <Button
-            variant={sidebarTab === "routes" && isSidebarOpen ? "default" : "ghost"}
-            size="sm"
-            onClick={() => { setSidebarTab("routes"); setIsSidebarOpen(true); }}
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
             className="cursor-pointer gap-1.5 hidden sm:flex"
           >
             <Route className="w-4 h-4" />
@@ -638,74 +892,6 @@ export default function Dashboard() {
               transition={{ duration: 0.3, ease: "easeInOut" }}
               className="glass-strong border-r border-white/30 z-55 shrink-0 overflow-hidden flex flex-col max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:w-80 max-md:shadow-2xl max-md:shadow-black/20"
             >
-              {/* ── Incidents tab ─────────────────────────────────── */}
-              {sidebarTab === "incidents" && (
-                <div className="flex flex-col flex-1 overflow-hidden">
-                  {/* Filter */}
-                  <div className="p-3 border-b border-white/20">
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 relative">
-                        <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                        <select
-                          value={typeFilter}
-                          onChange={(e) => setTypeFilter(e.target.value)}
-                          className="w-full glass rounded-lg pl-8 pr-3 py-2 text-sm bg-transparent border-0 focus:outline-none focus:ring-2 focus:ring-primary/30 appearance-none cursor-pointer"
-                        >
-                          <option value="all">All types</option>
-                          {Object.entries(typeLabels).map(([k, l]) => (
-                            <option key={k} value={k}>{l}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <span className="text-xs text-muted-foreground whitespace-nowrap">{filteredIncidents.length} active</span>
-                    </div>
-                  </div>
-
-                  {/* List */}
-                  <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                    {filteredIncidents.length === 0 ? (
-                      <div className="text-center py-12 text-muted-foreground">
-                        <AlertTriangle className="w-8 h-8 mx-auto mb-3 opacity-40" />
-                        <p className="text-sm font-medium">No incidents reported</p>
-                        <p className="text-xs mt-1">Tap &quot;+ Report Incident&quot; then tap the map</p>
-                      </div>
-                    ) : (
-                      filteredIncidents.map((inc) => (
-                        <motion.div
-                          key={inc._id}
-                          initial={{ opacity: 0, x: -10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          className="glass rounded-xl p-3 hover:bg-white/50 transition-colors cursor-pointer"
-                          onClick={() => { setMapCenter([inc.lat, inc.lng]); setMapZoom(16); }}
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-start gap-2.5 flex-1 min-w-0">
-                              <div className="w-8 h-8 rounded-lg bg-white/60 flex items-center justify-center shrink-0">
-                                {typeIcons[inc.type] || <AlertCircle className="w-3.5 h-3.5" />}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2">
-                                  <p className="text-sm font-semibold truncate">{typeLabels[inc.type] || inc.type}</p>
-                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium shrink-0 ${severityColors[inc.severity] || ""}`}>{inc.severity}</span>
-                                </div>
-                                {inc.description && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{inc.description}</p>}
-                                <div className="flex items-center gap-3 mt-1.5">
-                                  <span className="text-[10px] text-muted-foreground">by {inc.reportedBy}</span>
-                                  <span className="text-[10px] text-muted-foreground">{inc.reports} confirm{inc.reports !== 1 ? "s" : ""}</span>
-                                </div>
-                              </div>
-                            </div>
-                            <Button variant="ghost" size="icon" className="w-7 h-7 shrink-0 cursor-pointer" onClick={(e) => { e.stopPropagation(); handleConfirmIncident(inc._id); }}>
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                            </Button>
-                          </div>
-                        </motion.div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-
               {/* ── Routes tab ──────────────────────────────────────── */}
               {sidebarTab === "routes" && (
                 <div className="flex flex-col flex-1 overflow-hidden">
@@ -927,7 +1113,7 @@ export default function Dashboard() {
         </AnimatePresence>
 
         {/* ── Map ────────────────────────────────────────────────── */}
-        <div className="flex-1 relative z-0">
+        <div ref={mapContainerRef} className="flex-1 relative z-0">
           {locationLoading && (
             <div className="absolute inset-0 z-100 flex items-center justify-center bg-background/80 backdrop-blur-sm">
               <div className="glass-card p-6 flex flex-col items-center gap-3">
@@ -963,17 +1149,119 @@ export default function Dashboard() {
               onReportClick={handleReportMapClick}
               onOriginClick={handleOriginMapClick}
               onDestClick={handleDestMapClick}
+              onMapClick={() => setExpandedClusterIndex(null)}
             />
             <FlyTo center={mapCenter} zoom={mapZoom} />
 
-            {/* Incident markers */}
-            {filteredIncidents.map((inc) => (
-              <Marker
-                key={inc._id}
-                position={[inc.lat, inc.lng]}
-                icon={createIncidentIcon(inc.type)}
-              />
-            ))}
+            {/* Clustered incident markers – card replaces marker on click */}
+            {clusters.map((cluster, ci) => {
+              const isExpanded = expandedClusterIndex === ci;
+              const colorMap: Record<string, string> = {
+                pothole: "#eab308", landslide: "#a16207", accident: "#ef4444",
+                flood: "#3b82f6", construction: "#f97316", debris: "#8b5cf6",
+                ice: "#06b6d4", other: "#6b7280",
+              };
+              const color = colorMap[cluster.incidents[0].type] || "#6b7280";
+
+              // Build DivIcon HTML: either the full card (single) or a list card (cluster)
+              let cardHTML = "";
+              if (isExpanded && cluster.incidents.length === 1) {
+                const inc = cluster.incidents[0];
+                const nearbyIncidents = filteredIncidents.filter((other) =>
+                  haversineDistance(inc.lat, inc.lng, other.lat, other.lng) <= 50
+                );
+                cardHTML = buildIncidentCardHTML(
+                  inc, color, inc.reports, inc.downvotes || 0,
+                  locationNames.get(inc._id)
+                );
+              } else if (isExpanded && cluster.incidents.length > 1) {
+                // Cluster card: list all incidents
+                const listItems = cluster.incidents.map((inc) => {
+                  const ic = colorMap[inc.type] || "#6b7280";
+                  const incPlaceName = locationNames.get(inc._id) || `${inc.lat?.toFixed(4)}, ${inc.lng?.toFixed(4)}`;
+                  return `<div style="display:flex;flex-direction:column;gap:6px;padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.05)">
+                    <div style="display:flex;align-items:center;gap:6px">
+                      <div style="width:28px;height:28px;border-radius:7px;background:${ic}18;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="${ic}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                      </div>
+                      <div style="flex:1;min-width:0">
+                        <div style="display:flex;align-items:center;gap:5px">
+                          <span style="font-weight:700;font-size:12px;color:#1a1a2e">${typeLabels[inc.type] || inc.type}</span>
+                          <span style="font-size:9px;padding:1px 6px;border-radius:9999px;font-weight:600;border:1px solid ${ic}33;background:${ic}18;color:${ic}">${inc.severity}</span>
+                        </div>
+                        <p style="font-size:10px;color:#4b5563;margin:1px 0 0;display:flex;align-items:center;gap:3px">
+                          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                          ${incPlaceName}
+                        </p>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:2px;flex-shrink:0">
+                        <button data-action="confirm" data-incident-id="${inc._id}" style="display:flex;align-items:center;gap:3px;font-size:11px;font-weight:700;color:#059669;background:none;border:none;padding:4px 8px;border-radius:6px;cursor:pointer">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                          ${inc.reports}
+                        </button>
+                        <button data-action="downvote" data-incident-id="${inc._id}" style="display:flex;align-items:center;gap:3px;font-size:11px;font-weight:700;color:#ef4444;background:none;border:none;padding:4px 8px;border-radius:6px;cursor:pointer">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.77"/><path d="m19 18 2 2-4 4"/></svg>
+                          ${inc.downvotes || 0}
+                        </button>
+                      </div>
+                    </div>
+                    ${inc.imageUrl ? `<div style="margin-left:34px"><img src="${inc.imageUrl}" style="width:100%;max-height:80px;object-fit:cover;border-radius:8px;border:1px solid rgba(0,0,0,0.08)" /></div>` : ""}
+                  </div>`;
+                }).join("");
+
+                cardHTML = `
+                  <div style="width:320px;border-radius:12px;background:rgba(255,255,255,0.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.5);box-shadow:0 8px 40px rgba(0,0,0,0.12),0 2px 8px rgba(0,0,0,0.06);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1a1a2e;overflow:hidden">
+                    <div style="display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid rgba(0,0,0,0.06)">
+                      <div style="width:32px;height:32px;border-radius:8px;background:#3b82f615;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/></svg>
+                      </div>
+                      <div>
+                        <span style="font-weight:700;font-size:13px;color:#1a1a2e">${cluster.incidents.length} incidents nearby</span>
+                        <p style="font-size:10px;color:#4b5563;margin:1px 0 0;display:flex;align-items:center;gap:3px">
+                          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                          ${locationNames.get(cluster.incidents[0]._id) || "Location"}
+                        </p>
+                      </div>
+                    </div>
+                    <div style="padding:4px 14px">
+                      ${listItems}
+                    </div>
+                  </div>`;
+              }
+
+              if (isExpanded && cardHTML) {
+                // Expanded: card replaces the marker icon entirely
+                return (
+                  <Marker
+                    key={`cluster-${ci}`}
+                    position={[cluster.lat, cluster.lng]}
+                    icon={L.divIcon({
+                      className: "incident-card-marker",
+                      html: cardHTML,
+                      iconSize: [320, 0],
+                      iconAnchor: [160, 0],
+                    })}
+                    eventHandlers={{
+                      click: (e) => {
+                        L.DomEvent.stopPropagation(e.originalEvent);
+                      },
+                    }}
+                  />
+                );
+              }
+
+              // Collapsed: normal marker with click-to-expand
+              return (
+                <Marker
+                  key={`cluster-${ci}`}
+                  position={[cluster.lat, cluster.lng]}
+                  icon={createClusterIcon(cluster.incidents.length, cluster.incidents[0].type)}
+                  eventHandlers={{
+                    click: () => setExpandedClusterIndex(ci),
+                  }}
+                />
+              );
+            })}
 
             {/* Report location pin */}
             {reportLocation && (
@@ -985,6 +1273,20 @@ export default function Dashboard() {
                   iconSize: [22, 22],
                   iconAnchor: [11, 11],
                 })}
+              />
+            )}
+
+            {/* User tracking position marker */}
+            {userPosition && (
+              <CircleMarker
+                center={userPosition}
+                radius={8}
+                pathOptions={{
+                  color: "#3b82f6",
+                  fillColor: "#3b82f6",
+                  fillOpacity: 0.8,
+                  weight: 3,
+                }}
               />
             )}
 
@@ -1122,7 +1424,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* ── Map controls (zoom + recenter) ──────────────────── */}
+          {/* ── Map controls (zoom + recenter + tracking) ──────────── */}
           <div className="absolute top-20 right-4 z-1000 flex flex-col gap-2">
             <div className="glass-strong rounded-xl overflow-hidden shadow-lg">
               <Button variant="ghost" size="icon" className="w-10 h-10 rounded-none cursor-pointer" onClick={() => setMapZoom((z) => Math.min(z + 1, 18))}>
@@ -1145,6 +1447,15 @@ export default function Dashboard() {
               }}
             >
               <Locate className="w-4 h-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`glass-strong w-10 h-10 cursor-pointer shadow-lg ${isTracking ? "bg-blue-500/20 text-blue-600" : ""}`}
+              onClick={toggleTracking}
+              title={isTracking ? "Stop tracking" : "Track my position"}
+            >
+              <Navigation2 className="w-4 h-4" />
             </Button>
           </div>
 
@@ -1176,16 +1487,16 @@ export default function Dashboard() {
               animate={{ x: 0, opacity: 1 }}
               exit={{ x: "100%", opacity: 0 }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="absolute right-0 top-0 bottom-0 w-full sm:w-96 bg-white/95 backdrop-blur-xl border-l border-gray-200 z-65 flex flex-col overflow-hidden shadow-2xl"
+              className="absolute right-0 top-0 bottom-0 w-full sm:w-96 bg-background/95 backdrop-blur-xl border-l border-border z-65 flex flex-col overflow-hidden shadow-2xl"
             >
-              <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+              <div className="p-4 border-b border-border flex items-center justify-between">
                 <div>
                   <h2 className="text-lg font-bold">Report Incident</h2>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     {reportLocation ? "Location selected ✓" : "Tap the map to place a marker"}
                   </p>
                 </div>
-                <Button variant="ghost" size="icon" className="cursor-pointer" onClick={() => { setShowReportPanel(false); setMapMode("idle"); setReportLocation(null); }}>
+                <Button variant="ghost" size="icon" className="cursor-pointer" onClick={() => { setShowReportPanel(false); setMapMode("idle"); setReportLocation(null); setReportLocationName(""); }}>
                   <X className="w-4 h-4" />
                 </Button>
               </div>
@@ -1199,7 +1510,10 @@ export default function Dashboard() {
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-semibold">Selected Location</p>
                     {reportLocation ? (
-                      <p className="text-xs text-muted-foreground truncate">{reportLocation[0].toFixed(5)}, {reportLocation[1].toFixed(5)}</p>
+                      <div>
+                        {reportLocationName && <p className="text-xs font-medium text-foreground truncate mb-0.5">{reportLocationName}</p>}
+                        <p className="text-[10px] text-muted-foreground truncate">{reportLocation[0].toFixed(5)}, {reportLocation[1].toFixed(5)}</p>
+                      </div>
                     ) : (
                       <p className="text-xs text-amber-600">Tap the map to select</p>
                     )}
@@ -1210,10 +1524,10 @@ export default function Dashboard() {
                 <div>
                   <label className="text-xs font-semibold block mb-1.5">Incident Type *</label>
                   <Select value={reportType} onValueChange={setReportType}>
-                    <SelectTrigger className="glass border-white/30 bg-white/40 cursor-pointer"><SelectValue placeholder="Select type..." /></SelectTrigger>
-                    <SelectContent className="bg-white! border-gray-200! shadow-xl! z-2000 min-w-50" style={{ backgroundColor: '#ffffff' }}>
+                    <SelectTrigger className="glass border-border bg-background/40 cursor-pointer"><SelectValue placeholder="Select type..." /></SelectTrigger>
+                    <SelectContent className="bg-background! border-border! shadow-xl! z-2000 min-w-50">
                       {Object.entries(typeLabels).map(([k, l]) => (
-                        <SelectItem key={k} value={k} className="text-gray-900! hover:bg-gray-100! focus:bg-blue-50! focus:text-blue-700! cursor-pointer" style={{ color: '#1f2937' }}><div className="flex items-center gap-2" style={{ color: '#1f2937' }}>{typeIcons[k]}{l}</div></SelectItem>
+                        <SelectItem key={k} value={k} className="cursor-pointer"><div className="flex items-center gap-2">{typeIcons[k]}{l}</div></SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -1224,7 +1538,7 @@ export default function Dashboard() {
                   <label className="text-xs font-semibold block mb-1.5">Severity *</label>
                   <div className="grid grid-cols-4 gap-1.5">
                     {(["low", "medium", "high", "critical"] as const).map((s) => (
-                      <button key={s} onClick={() => setReportSeverity(s)} className={`glass rounded-lg py-2 px-1 text-xs font-semibold capitalize transition-all cursor-pointer ${reportSeverity === s ? `${severityColors[s]} ring-2 ring-offset-1 ring-current/20` : "bg-white/40 hover:bg-white/60"}`}>
+                      <button key={s} onClick={() => setReportSeverity(s)} className={`glass rounded-lg py-2 px-1 text-xs font-semibold capitalize transition-all cursor-pointer ${reportSeverity === s ? `${severityColors[s]} ring-2 ring-offset-1 ring-current/20` : "bg-muted/40 hover:bg-muted/60"}`}>
                         {s}
                       </button>
                     ))}
@@ -1234,13 +1548,13 @@ export default function Dashboard() {
                 {/* Description */}
                 <div>
                   <label className="text-xs font-semibold block mb-1.5">Description</label>
-                  <Textarea placeholder="Additional details (optional)..." value={reportDesc} onChange={(e) => setReportDesc(e.target.value)} className="glass border-white/30 bg-white/40 resize-none h-20" />
+                  <Textarea placeholder="Additional details (optional)..." value={reportDesc} onChange={(e) => setReportDesc(e.target.value)} className="glass border-border bg-background/40 resize-none h-20" />
                 </div>
 
                 {/* Photo Upload */}
                 <div>
                   <label className="text-xs font-semibold block mb-1.5">Photo Proof (optional)</label>
-                  <div className="glass rounded-xl border-2 border-dashed border-gray-300 p-4 text-center hover:border-blue-400 transition-colors">
+                  <div className="glass rounded-xl border-2 border-dashed border-border p-4 text-center hover:border-blue-400 transition-colors">
                     {reportImage ? (
                       <div className="space-y-2">
                         <img src={reportImage} alt="Incident proof" className="w-full h-32 object-cover rounded-lg" />
@@ -1267,7 +1581,7 @@ export default function Dashboard() {
                         <div className="space-y-1">
                           <svg className="w-8 h-8 mx-auto text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                           <p className="text-xs text-muted-foreground">Tap to upload a photo as proof</p>
-                          <p className="text-[10px] text-gray-400">JPG, PNG up to 5MB</p>
+                          <p className="text-[10px] text-muted-foreground">JPG, PNG up to 5MB</p>
                         </div>
                       </label>
                     )}
@@ -1275,7 +1589,7 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <div className="p-4 border-t border-gray-200 bg-white/90">
+              <div className="p-4 border-t border-border bg-background/90">
                 <Button
                   onClick={handleReportSubmit}
                   disabled={!reportType || !reportSeverity || !reportLocation || isReporting}

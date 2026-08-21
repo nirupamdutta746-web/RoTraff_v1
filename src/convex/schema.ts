@@ -88,6 +88,7 @@ const schema = defineSchema(
         v.literal("permanent"),
       ),
       reports: v.number(),
+      downvotes: v.optional(v.number()),
       reportedBy: v.string(),
       verifiedBy: v.optional(v.id("users")),
       createdAt: v.number(),
@@ -100,6 +101,16 @@ const schema = defineSchema(
 
     // Tracks which user verified which incident (prevents duplicate verifications)
     incidentVerifications: defineTable({
+      userId: v.id("users"),
+      incidentId: v.id("incidents"),
+      createdAt: v.number(),
+    })
+      .index("by_user", ["userId"])
+      .index("by_incident", ["incidentId"])
+      .index("by_user_incident", ["userId", "incidentId"]),
+
+    // Tracks which user downvoted which incident (prevents duplicate downvotes)
+    incidentDownvotes: defineTable({
       userId: v.id("users"),
       incidentId: v.id("incidents"),
       createdAt: v.number(),
