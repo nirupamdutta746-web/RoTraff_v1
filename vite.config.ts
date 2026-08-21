@@ -86,6 +86,10 @@ export default defineConfig({
         headers: {
           Accept: "application/json",
         },
+        timeout: 10000,
+        configure: (proxy) => {
+          proxy.on("error", () => {}); // suppress noisy proxy error logs
+        },
       },
     },
   },

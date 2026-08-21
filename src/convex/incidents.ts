@@ -129,10 +129,9 @@ export const report = mutation({
 });
 
 // Confirm / upvote an existing incident
-// REWARD_THRESHOLD: credit the reporter after this many confirmations.
-// PERMANENT_THRESHOLD: mark the incident as "permanent" on the map.
+// REWARD_THRESHOLD: credit the reporter with +5 ROTR after this many confirmations.
+// Only signed-in (non-guest) users receive the reward.
 const REWARD_THRESHOLD = 3;
-const PERMANENT_THRESHOLD = 10;
 
 export const confirm = mutation({
   args: { id: v.id("incidents") },
@@ -165,22 +164,15 @@ export const confirm = mutation({
         updatedAt: now,
       });
 
-      // Credit the original reporter with a reward (idempotent — won't double-pay)
-      await ctx.runMutation(api.rewards.creditReport, {
-        incidentId: args.id,
-        userId: incident.userId,
-      });
-    }
-
-    // Mark as permanent on the map after many verifications
-    if (
-      newCount >= PERMANENT_THRESHOLD &&
-      incident.status !== "permanent"
-    ) {
-      await ctx.db.patch(args.id, {
-        status: "permanent",
-        updatedAt: now,
-      });
+      // Only credit non-guest (signed-in) users
+      const reporter = await ctx.db.get(incident.userId);
+      if (reporter && !reporter.isAnonymous) {
+        // Credit the original reporter with a reward (idempotent — won't double-pay)
+        await ctx.runMutation(api.rewards.creditReport, {
+          incidentId: args.id,
+          userId: incident.userId,
+        });
+      }
     }
   },
 });

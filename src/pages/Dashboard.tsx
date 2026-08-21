@@ -554,7 +554,7 @@ export default function Dashboard() {
       <motion.header
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className="glass-strong border-b border-white/30 px-4 py-2.5 z-[60] flex items-center justify-between relative"
+        className="glass-strong border-b border-white/30 px-4 py-2.5 z-60 flex items-center justify-between relative"
       >
         <div className="flex items-center gap-3">
           <Button
@@ -566,7 +566,7 @@ export default function Dashboard() {
             <Menu className="w-5 h-5" />
           </Button>
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-md shadow-blue-500/20">
+            <div className="w-8 h-8 rounded-lg bg-linear-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-md shadow-blue-500/20">
               <Shield className="w-4 h-4 text-white" />
             </div>
             <span className="font-bold text-foreground hidden sm:block">RoTraff</span>
@@ -636,7 +636,7 @@ export default function Dashboard() {
               animate={{ width: 380, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.3, ease: "easeInOut" }}
-              className="glass-strong border-r border-white/30 z-[55] flex-shrink-0 overflow-hidden flex flex-col max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:w-80 max-md:shadow-2xl max-md:shadow-black/20"
+              className="glass-strong border-r border-white/30 z-55 shrink-0 overflow-hidden flex flex-col max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:w-80 max-md:shadow-2xl max-md:shadow-black/20"
             >
               {/* ── Incidents tab ─────────────────────────────────── */}
               {sidebarTab === "incidents" && (
@@ -680,13 +680,13 @@ export default function Dashboard() {
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="flex items-start gap-2.5 flex-1 min-w-0">
-                              <div className="w-8 h-8 rounded-lg bg-white/60 flex items-center justify-center flex-shrink-0">
+                              <div className="w-8 h-8 rounded-lg bg-white/60 flex items-center justify-center shrink-0">
                                 {typeIcons[inc.type] || <AlertCircle className="w-3.5 h-3.5" />}
                               </div>
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2">
                                   <p className="text-sm font-semibold truncate">{typeLabels[inc.type] || inc.type}</p>
-                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium flex-shrink-0 ${severityColors[inc.severity] || ""}`}>{inc.severity}</span>
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium shrink-0 ${severityColors[inc.severity] || ""}`}>{inc.severity}</span>
                                 </div>
                                 {inc.description && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{inc.description}</p>}
                                 <div className="flex items-center gap-3 mt-1.5">
@@ -695,7 +695,7 @@ export default function Dashboard() {
                                 </div>
                               </div>
                             </div>
-                            <Button variant="ghost" size="icon" className="w-7 h-7 flex-shrink-0 cursor-pointer" onClick={(e) => { e.stopPropagation(); handleConfirmIncident(inc._id); }}>
+                            <Button variant="ghost" size="icon" className="w-7 h-7 shrink-0 cursor-pointer" onClick={(e) => { e.stopPropagation(); handleConfirmIncident(inc._id); }}>
                               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
                             </Button>
                           </div>
@@ -736,7 +736,7 @@ export default function Dashboard() {
                         <Button
                           variant={mapMode === "setOrigin" ? "default" : "outline"}
                           size="icon"
-                          className="cursor-pointer glass border-white/30 bg-white/40 flex-shrink-0"
+                          className="cursor-pointer glass border-white/30 bg-white/40 shrink-0"
                           title="Set on map"
                           onClick={() => {
                             setMapMode(mapMode === "setOrigin" ? "idle" : "setOrigin");
@@ -754,7 +754,7 @@ export default function Dashboard() {
                         <div className="glass rounded-lg border border-white/30 max-h-32 overflow-y-auto">
                           {routeSearchResults.map((r) => (
                             <button key={r.id} onClick={() => handleSelectRouteResult(r)} className="w-full text-left px-3 py-2 hover:bg-white/50 transition-colors cursor-pointer flex items-center gap-2 text-xs">
-                              <CircleDot className="w-3 h-3 text-blue-500 flex-shrink-0" />
+                              <CircleDot className="w-3 h-3 text-blue-500 shrink-0" />
                               <div className="min-w-0">
                                 <p className="font-medium truncate">{r.name}</p>
                                 <p className="text-muted-foreground truncate">{r.address}</p>
@@ -785,7 +785,7 @@ export default function Dashboard() {
                         <Button
                           variant={mapMode === "setDest" ? "default" : "outline"}
                           size="icon"
-                          className="cursor-pointer glass border-white/30 bg-white/40 flex-shrink-0"
+                          className="cursor-pointer glass border-white/30 bg-white/40 shrink-0"
                           title="Set on map"
                           onClick={() => {
                             setMapMode(mapMode === "setDest" ? "idle" : "setDest");
@@ -803,7 +803,7 @@ export default function Dashboard() {
                         <div className="glass rounded-lg border border-white/30 max-h-32 overflow-y-auto">
                           {routeSearchResults.map((r) => (
                             <button key={r.id} onClick={() => handleSelectRouteResult(r)} className="w-full text-left px-3 py-2 hover:bg-white/50 transition-colors cursor-pointer flex items-center gap-2 text-xs">
-                              <Target className="w-3 h-3 text-violet-500 flex-shrink-0" />
+                              <Target className="w-3 h-3 text-violet-500 shrink-0" />
                               <div className="min-w-0">
                                 <p className="font-medium truncate">{r.name}</p>
                                 <p className="text-muted-foreground truncate">{r.address}</p>
@@ -861,7 +861,7 @@ export default function Dashboard() {
                     <Button
                       onClick={handleCalculateRoutes}
                       disabled={!originCoords || !destCoords || isCalculating}
-                      className="w-full cursor-pointer bg-gradient-to-r from-blue-500 to-violet-500 text-white border-0 hover:from-blue-600 hover:to-violet-600"
+                      className="w-full cursor-pointer bg-linear-to-r from-blue-500 to-violet-500 text-white border-0 hover:from-blue-600 hover:to-violet-600"
                     >
                       {isCalculating ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Navigation className="w-4 h-4 mr-2" />}
                       {isCalculating ? "Calculating..." : "Find Routes"}
@@ -893,7 +893,7 @@ export default function Dashboard() {
                                 <opt.icon className={`w-4 h-4 ${opt.color}`} />
                                 <span className="text-sm font-bold">{opt.label}</span>
                                 {/* Mini line-style indicator matching the map polyline */}
-                                <svg width="24" height="6" className="flex-shrink-0">
+                                <svg width="24" height="6" className="shrink-0">
                                   <line x1="0" y1="3" x2="24" y2="3" stroke="currentColor" strokeWidth="2.5" strokeDasharray={opt.key === "fastest" ? "none" : opt.key === "balanced" ? "6 3" : "2 4"} className={opt.color} />
                                 </svg>
                               </div>
@@ -929,7 +929,7 @@ export default function Dashboard() {
         {/* ── Map ────────────────────────────────────────────────── */}
         <div className="flex-1 relative z-0">
           {locationLoading && (
-            <div className="absolute inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm">
+            <div className="absolute inset-0 z-100 flex items-center justify-center bg-background/80 backdrop-blur-sm">
               <div className="glass-card p-6 flex flex-col items-center gap-3">
                 <Loader2 className="w-6 h-6 animate-spin text-primary" />
                 <p className="text-sm font-medium text-muted-foreground">Getting your location…</p>
@@ -1052,7 +1052,7 @@ export default function Dashboard() {
                 initial={{ y: -10, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 exit={{ y: -10, opacity: 0 }}
-                className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000]"
+                className="absolute top-3 left-1/2 -translate-x-1/2 z-1000"
               >
                 <div className="glass-strong rounded-full px-5 py-2 flex items-center gap-2 shadow-lg">
                   <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
@@ -1077,17 +1077,17 @@ export default function Dashboard() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="absolute inset-0 bg-black/20 backdrop-blur-sm z-[54] md:hidden"
+                className="absolute inset-0 bg-black/20 backdrop-blur-sm z-54 md:hidden"
                 onClick={() => setIsSidebarOpen(false)}
               />
             )}
           </AnimatePresence>
 
           {/* ── Search bar ──────────────────────────────────────── */}
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] w-full max-w-md px-4">
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-1000 w-full max-w-md px-4">
             <div className="glass-strong rounded-2xl shadow-lg overflow-hidden">
               <div className="flex items-center gap-2 px-4 py-2.5">
-                <svg className="w-4 h-4 text-muted-foreground flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" cy="21" x2="16.65" y2="16.65"/></svg>
+                <svg className="w-4 h-4 text-muted-foreground shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" cy="21" x2="16.65" y2="16.65"/></svg>
                 <input
                   type="text"
                   placeholder="Search places..."
@@ -1110,7 +1110,7 @@ export default function Dashboard() {
                       onClick={() => handleSelectSearchResult(r)}
                       className="w-full text-left px-4 py-2.5 hover:bg-white/40 transition-colors cursor-pointer flex items-center gap-2"
                     >
-                      <MapPin className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                      <MapPin className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                       <div className="min-w-0">
                         <p className="text-sm font-medium truncate">{r.name}</p>
                         <p className="text-xs text-muted-foreground truncate">{r.address}</p>
@@ -1123,7 +1123,7 @@ export default function Dashboard() {
           </div>
 
           {/* ── Map controls (zoom + recenter) ──────────────────── */}
-          <div className="absolute top-20 right-4 z-[1000] flex flex-col gap-2">
+          <div className="absolute top-20 right-4 z-1000 flex flex-col gap-2">
             <div className="glass-strong rounded-xl overflow-hidden shadow-lg">
               <Button variant="ghost" size="icon" className="w-10 h-10 rounded-none cursor-pointer" onClick={() => setMapZoom((z) => Math.min(z + 1, 18))}>
                 <Plus className="w-4 h-4" />
@@ -1149,7 +1149,7 @@ export default function Dashboard() {
           </div>
 
           {/* ── Report FAB ──────────────────────────────────────── */}
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="absolute bottom-4 right-4 z-[1000]">
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="absolute bottom-4 right-4 z-1000">
             <Button
               onClick={() => {
                 const opening = !showReportPanel;
@@ -1160,7 +1160,7 @@ export default function Dashboard() {
               className={`cursor-pointer rounded-2xl px-5 py-6 shadow-xl font-semibold gap-2 ${
                 showReportPanel
                   ? "bg-white text-foreground border border-border hover:bg-white/90"
-                  : "bg-gradient-to-r from-blue-500 to-violet-500 text-white border-0 hover:from-blue-600 hover:to-violet-600 shadow-blue-500/25"
+                  : "bg-linear-to-r from-blue-500 to-violet-500 text-white border-0 hover:from-blue-600 hover:to-violet-600 shadow-blue-500/25"
               }`}
             >
               {showReportPanel ? <><X className="w-5 h-5" /> Close</> : <><Plus className="w-5 h-5" /> Report Incident</>}
@@ -1176,7 +1176,7 @@ export default function Dashboard() {
               animate={{ x: 0, opacity: 1 }}
               exit={{ x: "100%", opacity: 0 }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="absolute right-0 top-0 bottom-0 w-full sm:w-96 bg-white/95 backdrop-blur-xl border-l border-gray-200 z-[65] flex flex-col overflow-hidden shadow-2xl"
+              className="absolute right-0 top-0 bottom-0 w-full sm:w-96 bg-white/95 backdrop-blur-xl border-l border-gray-200 z-65 flex flex-col overflow-hidden shadow-2xl"
             >
               <div className="p-4 border-b border-gray-200 flex items-center justify-between">
                 <div>
@@ -1211,9 +1211,9 @@ export default function Dashboard() {
                   <label className="text-xs font-semibold block mb-1.5">Incident Type *</label>
                   <Select value={reportType} onValueChange={setReportType}>
                     <SelectTrigger className="glass border-white/30 bg-white/40 cursor-pointer"><SelectValue placeholder="Select type..." /></SelectTrigger>
-                    <SelectContent className="!bg-white !border-gray-200 !shadow-xl z-[2000] min-w-[200px]" style={{ backgroundColor: '#ffffff' }}>
+                    <SelectContent className="bg-white! border-gray-200! shadow-xl! z-2000 min-w-50" style={{ backgroundColor: '#ffffff' }}>
                       {Object.entries(typeLabels).map(([k, l]) => (
-                        <SelectItem key={k} value={k} className="!text-gray-900 hover:!bg-gray-100 focus:!bg-blue-50 focus:!text-blue-700 cursor-pointer" style={{ color: '#1f2937' }}><div className="flex items-center gap-2" style={{ color: '#1f2937' }}>{typeIcons[k]}{l}</div></SelectItem>
+                        <SelectItem key={k} value={k} className="text-gray-900! hover:bg-gray-100! focus:bg-blue-50! focus:text-blue-700! cursor-pointer" style={{ color: '#1f2937' }}><div className="flex items-center gap-2" style={{ color: '#1f2937' }}>{typeIcons[k]}{l}</div></SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -1279,7 +1279,7 @@ export default function Dashboard() {
                 <Button
                   onClick={handleReportSubmit}
                   disabled={!reportType || !reportSeverity || !reportLocation || isReporting}
-                  className="w-full cursor-pointer bg-gradient-to-r from-blue-500 to-violet-500 text-white border-0 hover:from-blue-600 hover:to-violet-600 py-5"
+                  className="w-full cursor-pointer bg-linear-to-r from-blue-500 to-violet-500 text-white border-0 hover:from-blue-600 hover:to-violet-600 py-5"
                 >
                   {isReporting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <AlertTriangle className="w-4 h-4 mr-2" />}
                   {isReporting ? "Reporting..." : "Submit Report"}

@@ -81,15 +81,13 @@ export type TravelMode = "car" | "bicycle" | "pedestrian";
  * @param routeType "fastest" | "shortest" | "eco" | "thrilling"
  * @param traffic boolean - whether to use traffic data
  * @param travelMode "car" | "bicycle" | "pedestrian"
- * @param avoid comma-separated avoid constraints, e.g. "tollRoads,motorways"
  */
 export async function calculateRoute(
   origin: [number, number],
   destination: [number, number],
-  routeType: "fastest" | "short" | "eco" | "thrilling" = "fastest",
+  routeType: "fastest" | "shortest" | "eco" | "thrilling" = "fastest",
   traffic: boolean = true,
   travelMode: TravelMode = "car",
-  avoid?: string,
 ): Promise<TomTomRoute> {
   const key = getKey();
   const oLng = origin[1];
@@ -97,8 +95,7 @@ export async function calculateRoute(
   const dLng = destination[1];
   const dLat = destination[0];
 
-  let url = `${DIRECT}/routing/1/calculateRoute/${oLat},${oLng}:${dLat},${dLng}/json?key=${key}&routeType=${routeType}&traffic=${traffic ? "live" : "false"}&travelMode=${travelMode}&language=en-US`;
-  if (avoid) url += `&avoid=${avoid}`;
+  const url = `${DIRECT}/routing/1/calculateRoute/${oLat},${oLng}:${dLat},${dLng}/json?key=${key}&routeType=${routeType}&traffic=${traffic ? "live" : "false"}&travelMode=${travelMode}&language=en-US`;
 
   const resp = await fetch(url, { mode: "cors" });
   const data = await resp.json();
@@ -157,14 +154,27 @@ export async function calculateRoutes(
     // Route 1 — fastest considering live traffic
     calculateRoute(origin, destination, "fastest", true, travelMode),
     // Route 2 — shortest distance, traffic ignored for different geometry
-    calculateRoute(origin, destination, "short", false, travelMode),
-    // Route 3 — eco-friendly (optimized for fuel efficiency, different roads)
-    calculateRoute(origin, destination, "eco", true, travelMode),
+    calculateRoute(origin, destination, "shortest", false, travelMode),
+    // Route 3 — thrilling/scenic route (takes winding, scenic roads — visually distinct)
+    calculateRoute(origin, destination, "thrilling", false, travelMode),
   ]);
   return { fastest, shortest, eco };
 }
 
 // ── Geocoding / Search ────────────────────────────────────────────────────
+
+/**
+ * Helper: fetch with timeout so proxy failures fail fast.
+ */
+async function fetchWithTimeout(url: string, timeoutMs = 8000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * Search for places by text query.
@@ -183,7 +193,7 @@ export async function searchPlaces(
     url += `&lat=${biasLat}&lon=${biasLng}`;
   }
 
-  const resp = await fetch(url);
+  const resp = await fetchWithTimeout(url);
   if (!resp.ok) throw new Error(`Search failed: ${resp.status}`);
   const data = await resp.json();
 
@@ -201,17 +211,23 @@ export async function searchPlaces(
 
 /**
  * Reverse geocode: get address from coordinates.
+ * Returns coordinates as fallback on any error (timeout, network, API).
  */
 export async function reverseGeocode(
   lat: number,
   lng: number,
 ): Promise<string> {
-  const key = getKey();
-  const url = `${PROXY}/search/2/reverseGeocode/${lat},${lng}.json?key=${key}&language=en-US`;
-  const resp = await fetch(url);
-  if (!resp.ok) return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-  const data = await resp.json();
-  return data.addresses?.[0]?.address?.freeformAddress || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  try {
+    const key = getKey();
+    const url = `${PROXY}/search/2/reverseGeocode/${lat},${lng}.json?key=${key}&language=en-US`;
+    const resp = await fetchWithTimeout(url, 6000);
+    if (!resp.ok) return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    const data = await resp.json();
+    return data.addresses?.[0]?.address?.freeformAddress || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  } catch {
+    // Timeout or network error — return coords as fallback
+    return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
