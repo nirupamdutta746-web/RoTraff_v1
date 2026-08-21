@@ -18,6 +18,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { calculateRoutes, searchPlaces, reverseGeocode } from "@/lib/tomtom";
 import type { TomTomRoute, TravelMode } from "@/lib/tomtom";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   AlertTriangle,
   MapPin,
@@ -618,6 +619,7 @@ export default function Dashboard() {
               <span className="hidden lg:inline">Admin</span>
             </Button>
           )}
+          <ThemeToggle />
           <Button variant="ghost" size="icon" className="cursor-pointer text-muted-foreground hover:text-destructive" onClick={handleSignOut}>
             <LogOut className="w-4 h-4" />
           </Button>

@@ -6,6 +6,7 @@ import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   ArrowLeft,
   Wallet,
@@ -275,6 +276,7 @@ export default function WalletPage() {
               </p>
             </div>
           </div>
+          <ThemeToggle />
         </div>
       </motion.header>
 

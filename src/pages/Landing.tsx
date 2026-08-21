@@ -3,6 +3,7 @@ import { lazy, Suspense, useRef, type ReactNode } from "react";
 const TracingBeamDemo = lazy(() => import("@/components/TracingBeamDemo"));
 import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   Shield,
   MapPin,
@@ -195,6 +196,7 @@ export default function Landing() {
               </a>
             </div>
             <div className="flex items-center gap-3">
+              <ThemeToggle />
               <Button
                 variant="ghost"
                 size="sm"

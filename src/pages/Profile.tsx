@@ -7,6 +7,7 @@ import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   User,
   ArrowLeft,
@@ -198,9 +199,12 @@ export default function Profile() {
               <p className="text-xs text-muted-foreground">Manage your account and preferences</p>
             </div>
           </div>
-          <Button variant="ghost" size="icon" className="cursor-pointer" onClick={() => navigate("/sessions")}>
-            <History className="w-4 h-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <Button variant="ghost" size="icon" className="cursor-pointer" onClick={() => navigate("/sessions")}>
+              <History className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
       </motion.header>
 

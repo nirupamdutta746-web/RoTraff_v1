@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   Shield,
   ArrowLeft,
@@ -215,6 +216,7 @@ export default function AdminDashboard() {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground hidden sm:block">{user?.email}</span>
+            <ThemeToggle />
             <Button variant="ghost" size="icon" className="cursor-pointer text-muted-foreground hover:text-destructive" onClick={handleSignOut}>
               <LogOut className="w-4 h-4" />
             </Button>

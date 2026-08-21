@@ -136,6 +136,13 @@
       0 4px 30px rgba(0, 0, 0, 0.04),
       inset 0 1px 0 rgba(255, 255, 255, 0.6);
   }
+  .dark .glass {
+    background: rgba(30, 30, 30, 0.65);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow:
+      0 4px 30px rgba(0, 0, 0, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
   .glass-strong {
     background: rgba(255, 255, 255, 0.8);
     backdrop-filter: blur(24px) saturate(200%);
@@ -145,12 +152,24 @@
       0 8px 32px rgba(0, 0, 0, 0.06),
       inset 0 1px 0 rgba(255, 255, 255, 0.8);
   }
+  .dark .glass-strong {
+    background: rgba(25, 25, 25, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
   .glass-subtle {
     background: rgba(255, 255, 255, 0.4);
     backdrop-filter: blur(10px) saturate(160%);
     -webkit-backdrop-filter: blur(10px) saturate(160%);
     border: 1px solid rgba(255, 255, 255, 0.35);
     box-shadow: 0 2px 16px rgba(0, 0, 0, 0.03);
+  }
+  .dark .glass-subtle {
+    background: rgba(30, 30, 30, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 2px 16px rgba(0, 0, 0, 0.15);
   }
   .glass-card {
     background: rgba(255, 255, 255, 0.55);
@@ -162,6 +181,13 @@
       0 8px 32px rgba(0, 0, 0, 0.05),
       inset 0 1px 0 rgba(255, 255, 255, 0.6);
   }
+  .dark .glass-card {
+    background: rgba(25, 25, 25, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.25),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
   .gradient-bg {
     background: linear-gradient(
       135deg,
@@ -170,6 +196,16 @@
       oklch(0.97 0.015 280) 50%,
       oklch(0.95 0.025 200) 75%,
       oklch(0.96 0.02 240) 100%
+    );
+  }
+  .dark .gradient-bg {
+    background: linear-gradient(
+      135deg,
+      oklch(0.15 0.02 220) 0%,
+      oklch(0.13 0.03 250) 25%,
+      oklch(0.16 0.015 280) 50%,
+      oklch(0.14 0.025 200) 75%,
+      oklch(0.15 0.02 240) 100%
     );
   }
   .gradient-text {
