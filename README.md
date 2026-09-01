@@ -12,7 +12,7 @@
 [![Stellar](https://img.shields.io/badge/Stellar-Testnet-14B8E6?logo=stellar)](https://stellar.org)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-v4-06B6D4?logo=tailwindcss)](https://tailwindcss.com)
 
-[Live Demo](https://rot traff.com) · [Report Bug](https://github.com/your-username/rotraff/issues) · [Request Feature](https://github.com/your-username/rotraff/issues)
+[Live Demo](ro-traff-v1.vercel.app) · [Report Bug](https://github.com/your-username/rotraff/issues) · [Request Feature](https://github.com/your-username/rotraff/issues)
 
 </div>
 
