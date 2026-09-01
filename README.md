@@ -88,7 +88,7 @@ The app will be available at `http://localhost:5173`.
 | `STELLAR_KEY_ENCRYPTION_SECRET` | AES-256 key for encrypting Stellar secrets | Convex Dashboard |
 | `STELLAR_ISSUING_SECRET` | Stellar issuing account secret key | Convex Dashboard |
 | `STELLAR_DISTRIBUTION_SECRET` | Stellar distribution account secret key | Convex Dashboard |
-| `STELLAR_CONTRACT_ID` | Soroban contract ID (starts with C) | Convex Dashboard |
+| `STELLAR_CONTRACT_ID` | CAM3QPJEFVYQ4YF6XNZCFBNHMEWZNKH4QTH54YVBRHYFTPXXNKPG2QGC | Convex Dashboard |
 
 ### Stellar Testnet Setup (Optional)
 
