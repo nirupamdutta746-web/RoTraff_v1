@@ -92,13 +92,11 @@ async function invokeContract(
     .setTimeout(300)
     .build();
 
-  const simResult = await sorobanServer.simulateTransaction(tx);
-  if (rpc.Api.isSimulationError(simResult)) {
-    throw new Error("Contract simulation failed: " + simResult.error);
-  }
+  // Prepare the transaction: simulates + applies Soroban auth & resource budget
+  const preparedTx = await sorobanServer.prepareTransaction(tx);
 
-  tx.sign(signer);
-  const sendResult = await sorobanServer.sendTransaction(tx);
+  preparedTx.sign(signer);
+  const sendResult = await sorobanServer.sendTransaction(preparedTx);
   if (sendResult.status === "ERROR") {
     throw new Error("Transaction submit failed");
   }
@@ -116,7 +114,7 @@ async function invokeContract(
     throw new Error("Transaction not successful: " + status);
   }
 
-  return simResult.result?.retval ?? xdr.ScVal.scvVoid();
+  return xdr.ScVal.scvVoid();
 }
 
 // -- Provision Wallet --------------------------------------------------------
@@ -186,17 +184,24 @@ export interface BalanceInfo {
 }
 
 export async function getRotBalance(publicKey: string): Promise<BalanceInfo> {
-  const { adminKeypair } = getConfig();
+  const { adminKeypair, contractId } = getConfig();
 
-  // Try Soroban contract first (if deployed)
+  // Try Soroban contract first (read-only simulation)
   try {
-    const result = await invokeContract(
-      "balance",
-      [Address.fromString(publicKey).toScVal()],
-      adminKeypair,
-    );
-    const balance = scValToNative(result)?.toString() ?? "0";
-    return { assetCode: "ROTR", balance, issuer: adminKeypair.publicKey() };
+    const contract = new Contract(contractId);
+    const account = await sorobanServer.getAccount(adminKeypair.publicKey());
+    const tx = new TransactionBuilder(account, {
+      fee: "100000",
+      networkPassphrase: NETWORK_PASSPHRASE,
+    })
+      .addOperation(contract.call("balance", Address.fromString(publicKey).toScVal()))
+      .setTimeout(30)
+      .build();
+    const simResult = await sorobanServer.simulateTransaction(tx);
+    if (!rpc.Api.isSimulationError(simResult) && simResult.result?.retval) {
+      const balance = scValToNative(simResult.result.retval)?.toString() ?? "0";
+      return { assetCode: "ROTR", balance, issuer: adminKeypair.publicKey() };
+    }
   } catch {
     // Contract not deployed or call failed — fall back to Horizon
   }
