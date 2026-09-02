@@ -1,2 +1,2 @@
-[target.x86_64-pc-windows-msvc]
-linker = "rust-lld"
+# Use default linker for host target (build scripts / proc macros)
+# The wasm32v1-none target doesn't need a linker override
