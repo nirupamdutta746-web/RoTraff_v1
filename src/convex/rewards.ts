@@ -236,6 +236,49 @@ export const forceRetryFailedReward = mutation({
 });
 
 /**
+ * Admin cleanup: delete a single reward transaction by ID.
+ * Use this to remove stale records from a previous contract or test data.
+ *
+ * Convex dashboard → Functions → rewards.deleteTransaction
+ * Args: { transactionId: "<id>" }
+ */
+export const deleteTransaction = mutation({
+  args: { transactionId: v.id("rewardTransactions") },
+  handler: async (ctx, args) => {
+    const txn = await ctx.db.get(args.transactionId);
+    if (!txn) return { success: false, error: "Transaction not found" };
+    await ctx.db.delete(args.transactionId);
+    return { success: true, deleted: args.transactionId };
+  },
+});
+
+/**
+ * Get all confirmed transactions with the old fake hash (for backfill).
+ * Returns records that need their stellarTransactionHash corrected.
+ */
+export const getConfirmedWithFakeHash = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db
+      .query("rewardTransactions")
+      .withIndex("by_status", (q) => q.eq("status", "confirmed"))
+      .collect()
+      .then((txns) =>
+        txns
+          .filter((t) => t.stellarTransactionHash === "contract_invoked")
+          .map((t) => ({
+            _id: t._id,
+            userId: t.userId,
+            incidentId: t.incidentId,
+            amount: t.amount,
+            reason: t.reason,
+            createdAt: t.createdAt,
+          })),
+      );
+  },
+});
+
+/**
  * Get all pending reward transactions (for batch processing).
  */
 export const getPendingTransactions = query({

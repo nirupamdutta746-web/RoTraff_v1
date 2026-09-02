@@ -79,7 +79,7 @@ async function invokeContract(
   method: string,
   args: xdr.ScVal[],
   signer: Keypair,
-): Promise<xdr.ScVal> {
+): Promise<{ hash: string }> {
   const { contractId } = getConfig();
   const contract = new Contract(contractId);
   const account = await sorobanServer.getAccount(signer.publicKey());
@@ -114,7 +114,7 @@ async function invokeContract(
     throw new Error("Transaction not successful: " + status);
   }
 
-  return xdr.ScVal.scvVoid();
+  return { hash: sendResult.hash };
 }
 
 // -- Provision Wallet --------------------------------------------------------
@@ -146,7 +146,7 @@ export async function sendRewardPayment(
   incidentId: number,
 ): Promise<PaymentResult> {
   const { adminKeypair } = getConfig();
-  await invokeContract(
+  const { hash } = await invokeContract(
     "reward_report",
     [
       Address.fromString(adminKeypair.publicKey()).toScVal(),
@@ -155,7 +155,7 @@ export async function sendRewardPayment(
     ],
     adminKeypair,
   );
-  return { hash: "contract_invoked" };
+  return { hash };
 }
 
 export async function sendVerificationReward(
@@ -163,7 +163,7 @@ export async function sendVerificationReward(
   incidentId: number,
 ): Promise<PaymentResult> {
   const { adminKeypair } = getConfig();
-  await invokeContract(
+  const { hash } = await invokeContract(
     "reward_verification",
     [
       Address.fromString(adminKeypair.publicKey()).toScVal(),
@@ -172,7 +172,7 @@ export async function sendVerificationReward(
     ],
     adminKeypair,
   );
-  return { hash: "contract_invoked" };
+  return { hash };
 }
 
 // -- Balance Query (via Soroban Contract) -------------------------------------
@@ -202,8 +202,8 @@ export async function getRotBalance(publicKey: string): Promise<BalanceInfo> {
       const balance = scValToNative(simResult.result.retval)?.toString() ?? "0";
       return { assetCode: "ROTR", balance, issuer: adminKeypair.publicKey() };
     }
-  } catch {
-    // Contract not deployed or call failed — fall back to Horizon
+  } catch (err) {
+    console.error("[Stellar] Soroban balance simulation failed:", err);
   }
 
   // Fallback: query Horizon for ROTR classic asset balance
@@ -217,7 +217,8 @@ export async function getRotBalance(publicKey: string): Promise<BalanceInfo> {
       balance: line ? line.balance : "0",
       issuer: adminKeypair.publicKey(),
     };
-  } catch {
+  } catch (err) {
+    console.error("[Stellar] Horizon balance fallback failed:", err);
     return { assetCode: "ROTR", balance: "0", issuer: adminKeypair.publicKey() };
   }
 }
@@ -231,6 +232,138 @@ export async function getDistributionBalance(): Promise<string> {
   } catch {
     return "0";
   }
+}
+
+// -- Backfill: find real tx hashes for old "contract_invoked" records ------
+
+export interface BackfillMatch {
+  userPublicKey: string;
+  incidentId: number;
+  realHash: string;
+}
+
+/**
+ * Decode a Soroban transaction envelope and extract contract call details.
+ * Returns an array of { contractId, method, args } for each InvokeHostFunction op.
+ */
+function decodeSorobanCalls(
+  envelopeXdr: string,
+): Array<{ contractAddress: string; method: string; args: xdr.ScVal[] }> {
+  const envelope = xdr.TransactionEnvelope.fromXDR(envelopeXdr, "base64");
+
+  let operations: xdr.Operation[];
+  switch (envelope.switch()) {
+    case xdr.EnvelopeType.envelopeTypeTxV0():
+      operations = envelope.v0().tx().operations();
+      break;
+    case xdr.EnvelopeType.envelopeTypeTx():
+      operations = envelope.v1().tx().operations();
+      break;
+    case xdr.EnvelopeType.envelopeTypeTxFeeBump(): {
+      const inner = envelope.feeBump().tx().innerTx();
+      if (inner.switch() === xdr.EnvelopeType.envelopeTypeTx()) {
+        operations = inner.v1().tx().operations();
+      } else {
+        return [];
+      }
+      break;
+    }
+    default:
+      return [];
+  }
+
+  const results: Array<{ contractAddress: string; method: string; args: xdr.ScVal[] }> = [];
+  for (const op of operations) {
+    if (op.body().switch() !== xdr.OperationType.invokeHostFunction()) continue;
+    const invokeOp = op.body().invokeHostFunctionOp();
+    const hostFn = invokeOp.hostFunction();
+    if (hostFn.switch() !== xdr.HostFunctionType.hostFunctionTypeInvokeContract()) continue;
+    const contract = hostFn.invokeContract();
+    results.push({
+      contractAddress: Address.fromScAddress(contract.contractAddress()).toString(),
+      method: contract.functionName().toString(),
+      args: contract.args(),
+    });
+  }
+  return results;
+}
+
+/**
+ * Query Horizon for all admin-signed Soroban reward transactions,
+ * decode their envelopes, and return a lookup map keyed by
+ * (recipientPublicKey + incidentId) → real transaction hash.
+ *
+ * This is used by the backfill action to replace the old
+ * hardcoded "contract_invoked" hashes with real on-chain hashes.
+ */
+export async function findRealTxHashes(): Promise<BackfillMatch[]> {
+  const { adminKeypair, contractId } = getConfig();
+  const adminPubKey = adminKeypair.publicKey();
+  const matches: BackfillMatch[] = [];
+
+  // Paginate through all transactions signed by the admin account
+  let page = await horizonServer
+    .transactions()
+    .forAccount(adminPubKey)
+    .limit(200)
+    .order("desc")
+    .call();
+
+  let safetyCounter = 0;
+  while (page.records.length > 0 && safetyCounter < 20) {
+    safetyCounter++;
+
+    for (const txn of page.records) {
+      // Only process successful transactions
+      if (txn.successful !== true) continue;
+
+      let calls: Array<{ contractAddress: string; method: string; args: xdr.ScVal[] }>;
+      try {
+        calls = decodeSorobanCalls(txn.envelope_xdr);
+      } catch {
+        continue; // skip unparseable envelopes
+      }
+
+      for (const call of calls) {
+        // Only match calls to our contract with reward methods
+        if (call.contractAddress !== contractId) continue;
+        if (call.method !== "reward_report" && call.method !== "reward_verification") continue;
+        if (call.args.length < 3) continue;
+
+        // args[0] = admin address (ignore — we know it's the admin)
+        // args[1] = user/recipient address
+        // args[2] = incident_id (U64)
+        try {
+          const userPublicKey = scValToNative(call.args[1]) as string;
+          const incidentIdRaw = scValToNative(call.args[2]);
+          const incidentId = typeof incidentIdRaw === "number"
+            ? incidentIdRaw
+            : typeof incidentIdRaw === "bigint"
+              ? Number(incidentIdRaw)
+              : parseInt(String(incidentIdRaw), 10);
+
+          if (userPublicKey && !isNaN(incidentId)) {
+            matches.push({
+              userPublicKey,
+              incidentId,
+              realHash: txn.hash,
+            });
+          }
+        } catch {
+          continue; // skip if arg decoding fails
+        }
+      }
+    }
+
+    // Next page
+    if (page.next) {
+      page = await page.next();
+    } else {
+      break;
+    }
+  }
+
+  return matches;
 }
 
 // -- Asset Info ---------------------------------------------------------------

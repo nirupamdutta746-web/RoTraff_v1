@@ -3,7 +3,7 @@
 import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { api } from "./_generated/api";
-import { sendRewardPayment } from "../lib/stellar";
+import { sendRewardPayment, findRealTxHashes } from "../lib/stellar";
 
 /**
  * Process a single pending reward by calling the Soroban ROTR contract.
@@ -93,5 +93,97 @@ export const processAllPending = action({
     }
 
     return { scheduled: pending.length };
+  },
+});
+
+/**
+ * Backfill: replace old hardcoded "contract_invoked" hashes with real
+ * on-chain transaction hashes by querying Horizon for admin-signed
+ * Soroban transactions and matching by recipient + incident ID.
+ *
+ * Run once via Convex dashboard → Functions → rewardActions.backfillTransactionHashes
+ * Safe to run multiple times — only touches records with the fake hash.
+ */
+export const backfillTransactionHashes = action({
+  args: {},
+  returns: v.object({
+    message: v.string(),
+    updated: v.number(),
+    notFound: v.number(),
+    total: v.number(),
+  }),
+  handler: async (ctx) => {
+    // 1. Get all confirmed records with the old fake hash
+    const fakeRecords: Array<{
+      _id: string;
+      userId: string;
+      incidentId: string | undefined;
+      amount: number;
+      reason: string;
+      createdAt: number;
+    }> = await ctx.runQuery(api.rewards.getConfirmedWithFakeHash);
+    if (fakeRecords.length === 0) {
+      return { message: "No records to backfill", updated: 0, notFound: 0, total: 0 };
+    }
+
+    console.log(`[Backfill] Found ${fakeRecords.length} records with fake hash`);
+
+    // 2. Query Horizon for real transaction hashes
+    const realHashes = await findRealTxHashes();
+    console.log(`[Backfill] Found ${realHashes.length} on-chain reward transactions`);
+
+    // 3. Build a lookup: (userPublicKey, incidentId) → realHash
+    const hashLookup = new Map<string, string>();
+    for (const match of realHashes) {
+      const key = `${match.userPublicKey}:${match.incidentId}`;
+      hashLookup.set(key, match.realHash);
+    }
+
+    // 4. Match and update
+    let updated = 0;
+    let notFound = 0;
+    for (const record of fakeRecords) {
+      if (!record.incidentId) {
+        notFound++;
+        continue;
+      }
+
+      // Look up the user's wallet to get their public key
+      const wallet: { publicKey: string } | null = await ctx.runQuery(api.wallets.getWalletByUser, {
+        userId: record.userId as any,
+      });
+      if (!wallet) {
+        notFound++;
+        continue;
+      }
+
+      // Parse incidentId the same way processPendingReward does
+      const incidentIdNum = parseInt(
+        String(record.incidentId).replace(/[^0-9]/g, "").slice(0, 15) || "0",
+        10,
+      );
+      const key = `${wallet.publicKey}:${incidentIdNum}`;
+      const realHash = hashLookup.get(key);
+
+      if (realHash) {
+        await ctx.runMutation(api.rewards.confirmReward, {
+          transactionId: record._id as any,
+          stellarTransactionHash: realHash,
+        });
+        updated++;
+      } else {
+        notFound++;
+        console.warn(
+          `[Backfill] No match for user=${wallet.publicKey} incident=${incidentIdNum}`,
+        );
+      }
+    }
+
+    return {
+      message: `Backfill complete: ${updated} updated, ${notFound} unmatched`,
+      updated,
+      notFound,
+      total: fakeRecords.length,
+    };
   },
 });
