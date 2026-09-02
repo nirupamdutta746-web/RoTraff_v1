@@ -65,8 +65,8 @@ export const getWalletByUser = query({
 // ── Asset Info ────────────────────────────────────────────────────────────
 
 /**
- * Get the ROTR asset metadata including the issuing account public key
- * (which serves as the Stellar "contract ID" for this asset).
+ * Get the ROTR asset metadata including the Soroban contract ID
+ * and issuing account public key.
  */
 export const getAssetInfo = query({
   args: {},
@@ -80,11 +80,12 @@ export const getAssetInfo = query({
 /**
  * Provision a Stellar wallet for the current user.
  * Idempotent: checks for existing wallet before creating.
- * Calls Friendbot + ChangeTrust internally via Stellar service.
+ * Calls Friendbot internally via Stellar service (no trustline needed).
  */
 /**
  * Provision a Stellar wallet for the current user.
  * Schedules the actual provisioning as an action (fetch only runs in actions).
+ * No trustline needed — token balances are managed by the Soroban contract.
  */
 export const provision = mutation({
   args: {},
@@ -114,6 +115,7 @@ export const provision = mutation({
 
 /**
  * Save a provisioned wallet to the database (called from walletActions).
+ * Secret key is AES-256-GCM encrypted — never returned by queries.
  */
 export const saveWallet = mutation({
   args: {

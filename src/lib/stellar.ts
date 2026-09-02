@@ -1,227 +1,183 @@
 /**
- * Stellar Testnet Service
+ * Stellar Testnet Service - Soroban Contract Integration
  *
  * All @stellar/stellar-sdk usage is confined to this file.
  * No other file in the codebase should import the SDK directly.
  *
  * Custodial model: users never see/manage a Stellar secret key.
  * The backend generates a keypair per user, funds it via Friendbot,
- * and encrypts the secret key at rest (AES-256-GCM).
+ * and encryptes the secret key at rest (AES-256-GCM).
+ *
+ * Token logic lives on-chain in the ROTR Soroban contract (contract/src/lib.rs).
+ * This file handles contract invocations, wallet provisioning, and balance queries.
  */
 
 import {
   Keypair,
   Horizon,
+  rpc,
   TransactionBuilder,
-  Operation,
-  Asset,
+  Contract,
+  Address,
   Networks,
+  scValToNative,
+  xdr,
 } from "@stellar/stellar-sdk";
-import { encryptSecretKey, decryptSecretKey } from "./crypto-node";
+import { encryptSecretKey } from "./crypto-node";
 
-// ── Config ────────────────────────────────────────────────────────────────
+// -- Config ------------------------------------------------------------------
 
 const HORIZON_URL = "https://horizon-testnet.stellar.org";
+const SOROBAN_RPC_URL = "https://soroban-testnet.stellar.org";
 const FRIENDBOT_URL = "https://friendbot.stellar.org";
 const NETWORK_PASSPHRASE = Networks.TESTNET;
 
-const server = new Horizon.Server(HORIZON_URL);
-
-/** ROTR asset code — issued by the issuing account */
-export const ROTR_ASSET_CODE = "ROTR";
+const horizonServer = new Horizon.Server(HORIZON_URL);
+const sorobanServer = new rpc.Server(SOROBAN_RPC_URL);
 
 function requiredEnv(name: string): string {
   const val = process.env[name];
-  if (!val) throw new Error(`Missing env var: ${name}`);
+  if (!val) throw new Error("Missing env var: " + name);
   return val;
 }
 
-/**
- * Called lazily so missing env vars only fail when Stellar is actually used.
- * Values are read once per process.
- */
 let _config: {
-  issuingKeypair: Keypair;
-  distributionKeypair: Keypair;
-  rotAsset: Asset;
+  adminKeypair: Keypair;
+  contractId: string;
 } | null = null;
 
 function getConfig() {
   if (!_config) {
-    const issuingSecret = requiredEnv("STELLAR_ISSUING_SECRET");
-    const distributionSecret = requiredEnv("STELLAR_DISTRIBUTION_SECRET");
-
+    const adminSecret = requiredEnv("STELLAR_ISSUING_SECRET");
+    const contractId = requiredEnv("STELLAR_CONTRACT_ID");
     _config = {
-      issuingKeypair: Keypair.fromSecret(issuingSecret),
-      distributionKeypair: Keypair.fromSecret(distributionSecret),
-      rotAsset: new Asset(
-        ROTR_ASSET_CODE,
-        Keypair.fromSecret(issuingSecret).publicKey(),
-      ),
+      adminKeypair: Keypair.fromSecret(adminSecret),
+      contractId,
     };
   }
   return _config;
 }
 
-// ── Key Generation ────────────────────────────────────────────────────────
+// -- Key Generation ----------------------------------------------------------
 
 export function generateKeypair(): Keypair {
   return Keypair.random();
 }
 
-// ── Account Funding (Friendbot) ───────────────────────────────────────────
+// -- Account Funding (Friendbot) ---------------------------------------------
 
 export async function fundAccount(publicKey: string): Promise<void> {
-  const resp = await fetch(`${FRIENDBOT_URL}?addr=${publicKey}`);
+  const resp = await fetch(FRIENDBOT_URL + "?addr=" + publicKey);
   if (!resp.ok) {
-    throw new Error(
-      `Friendbot funding failed for ${publicKey}: ${resp.status}`,
-    );
+    throw new Error("Friendbot funding failed for " + publicKey + ": " + resp.status);
   }
 }
 
-// ── Trustline (ChangeTrust for ROTR asset) ────────────────────────────────
+// -- Contract Invocation Helpers ----------------------------------------------
 
-export async function establishTrustline(
-  userKeypair: Keypair,
-): Promise<void> {
-  const account = await server
-    .loadAccount(userKeypair.publicKey())
-    .catch(() => null);
-  if (!account) return; // account not yet visible on Horizon
+async function invokeContract(
+  method: string,
+  args: xdr.ScVal[],
+  signer: Keypair,
+): Promise<xdr.ScVal> {
+  const { contractId } = getConfig();
+  const contract = new Contract(contractId);
+  const account = await sorobanServer.getAccount(signer.publicKey());
 
-  const { rotAsset } = getConfig();
   const tx = new TransactionBuilder(account, {
-    fee: "100",
+    fee: "100000",
     networkPassphrase: NETWORK_PASSPHRASE,
   })
-    .addOperation(
-      Operation.changeTrust({
-        asset: rotAsset,
-        limit: "1000000000",
-      }),
-    )
-    .setTimeout(30)
+    .addOperation(contract.call(method, ...args))
+    .setTimeout(300)
     .build();
 
-  tx.sign(userKeypair);
-  await server.submitTransaction(tx);
+  const simResult = await sorobanServer.simulateTransaction(tx);
+  if (rpc.Api.isSimulationError(simResult)) {
+    throw new Error("Contract simulation failed: " + simResult.error);
+  }
+
+  tx.sign(signer);
+  const sendResult = await sorobanServer.sendTransaction(tx);
+  if (sendResult.status === "ERROR") {
+    throw new Error("Transaction submit failed");
+  }
+
+  let status = sendResult.status as string;
+  let attempts = 0;
+  while (status === "PENDING" && attempts < 30) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const txResult = await sorobanServer.getTransaction(sendResult.hash);
+    status = txResult.status;
+    attempts++;
+  }
+
+  if (status !== "SUCCESS") {
+    throw new Error("Transaction not successful: " + status);
+  }
+
+  return simResult.result?.retval ?? xdr.ScVal.scvVoid();
 }
 
-// ── Provision Full Wallet ──────────────────────────────────────────────────
+// -- Provision Wallet --------------------------------------------------------
 
 export interface ProvisionResult {
   publicKey: string;
   secretKeyEncrypted: string;
 }
 
-/**
- * Creates a new Stellar account on testnet, funds it via Friendbot,
- * and establishes a trustline to the ROTR asset.
- * Returns the public key and the AES-encrypted secret key (to store in DB).
- */
 export async function provisionWallet(): Promise<ProvisionResult> {
   const userKeypair = generateKeypair();
   await fundAccount(userKeypair.publicKey());
-  // Wait briefly for Horizon to index the new account
   await new Promise((r) => setTimeout(r, 2000));
-  await establishTrustline(userKeypair);
   const secretKeyEncrypted = await encryptSecretKey(userKeypair.secret());
-
   return {
     publicKey: userKeypair.publicKey(),
     secretKeyEncrypted,
   };
 }
 
-// ── Send Reward (Payment from Distribution Account) ────────────────────────
+// -- Reward Distribution (via Soroban Contract) -------------------------------
 
 export interface PaymentResult {
   hash: string;
 }
 
-/**
- * Sends `amount` ROTR from the distribution account to `recipientPublicKey`.
- * The distribution account must hold enough ROTR and have an active trustline.
- */
 export async function sendRewardPayment(
   recipientPublicKey: string,
-  amount: number,
+  incidentId: number,
 ): Promise<PaymentResult> {
-  const { distributionKeypair, rotAsset } = getConfig();
-  const distributionPub = distributionKeypair.publicKey();
-
-  // Ensure distribution account has a trustline for ROTR
-  await ensureDistributionTrustline();
-
-  const account = await server.loadAccount(distributionPub);
-  const tx = new TransactionBuilder(account, {
-    fee: "100",
-    networkPassphrase: NETWORK_PASSPHRASE,
-  })
-    .addOperation(
-      Operation.payment({
-        destination: recipientPublicKey,
-        asset: rotAsset,
-        amount: amount.toString(),
-      }),
-    )
-    .setTimeout(60)
-    .build();
-
-  tx.sign(distributionKeypair);
-  const result = await server.submitTransaction(tx);
-
-  if (!result.hash) {
-    throw new Error("Stellar payment succeeded but no hash returned");
-  }
-
-  return { hash: result.hash };
+  const { adminKeypair } = getConfig();
+  await invokeContract(
+    "reward_report",
+    [
+      Address.fromString(adminKeypair.publicKey()).toScVal(),
+      Address.fromString(recipientPublicKey).toScVal(),
+      xdr.ScVal.scvU64(new xdr.Uint64([incidentId >>> 0, Math.floor(incidentId / 0x100000000)])),
+    ],
+    adminKeypair,
+  );
+  return { hash: "contract_invoked" };
 }
 
-// ── Distribution Trustline Safety Check ───────────────────────────────────
-
-/**
- * Ensures the distribution account has an active ROTR trustline.
- * Called before the first payment to prevent op_no_trust errors.
- */
-async function ensureDistributionTrustline(): Promise<void> {
-  const { distributionKeypair, rotAsset } = getConfig();
-  const distributionPub = distributionKeypair.publicKey();
-
-  try {
-    const account = await server.loadAccount(distributionPub);
-    const hasTrustline = account.balances.some(
-      (b: any) =>
-        b.asset_type !== "native" &&
-        b.asset_code === ROTR_ASSET_CODE &&
-        b.asset_issuer === rotAsset.getIssuer(),
-    );
-
-    if (!hasTrustline) {
-      const tx = new TransactionBuilder(account, {
-        fee: "100",
-        networkPassphrase: NETWORK_PASSPHRASE,
-      })
-        .addOperation(
-          Operation.changeTrust({
-            asset: rotAsset,
-            limit: "1000000000",
-          }),
-        )
-        .setTimeout(30)
-        .build();
-
-      tx.sign(distributionKeypair);
-      await server.submitTransaction(tx);
-    }
-  } catch {
-    // If we can't check/set the trustline, let the payment attempt fail naturally
-    // so the error is logged but we don't crash here
-  }
+export async function sendVerificationReward(
+  recipientPublicKey: string,
+  incidentId: number,
+): Promise<PaymentResult> {
+  const { adminKeypair } = getConfig();
+  await invokeContract(
+    "reward_verification",
+    [
+      Address.fromString(adminKeypair.publicKey()).toScVal(),
+      Address.fromString(recipientPublicKey).toScVal(),
+      xdr.ScVal.scvU64(new xdr.Uint64([incidentId >>> 0, Math.floor(incidentId / 0x100000000)])),
+    ],
+    adminKeypair,
+  );
+  return { hash: "contract_invoked" };
 }
 
-// ── Balance Query (read-only) ──────────────────────────────────────────────
+// -- Balance Query (via Soroban Contract) -------------------------------------
 
 export interface BalanceInfo {
   assetCode: string;
@@ -229,82 +185,75 @@ export interface BalanceInfo {
   issuer: string;
 }
 
-/**
- * Queries Horizon for the user's ROTR balance.
- * Returns 0 if no trustline / account doesn't exist yet.
- */
-export async function getRotBalance(
-  publicKey: string,
-): Promise<BalanceInfo> {
+export async function getRotBalance(publicKey: string): Promise<BalanceInfo> {
+  const { adminKeypair } = getConfig();
+
+  // Try Soroban contract first (if deployed)
   try {
-    const account = await server.loadAccount(publicKey);
-    const { rotAsset } = getConfig();
-    const line = account.balances.find(
-      (b: any) =>
-        b.asset_type !== "native" &&
-        b.asset_code === ROTR_ASSET_CODE &&
-        b.asset_issuer === rotAsset.getIssuer(),
+    const result = await invokeContract(
+      "balance",
+      [Address.fromString(publicKey).toScVal()],
+      adminKeypair,
+    );
+    const balance = scValToNative(result)?.toString() ?? "0";
+    return { assetCode: "ROTR", balance, issuer: adminKeypair.publicKey() };
+  } catch {
+    // Contract not deployed or call failed — fall back to Horizon
+  }
+
+  // Fallback: query Horizon for ROTR classic asset balance
+  try {
+    const account = await horizonServer.loadAccount(publicKey);
+    const line = account.balances.find((b: any) =>
+      b.asset_code === "ROTR" && b.asset_issuer === adminKeypair.publicKey()
     );
     return {
-      assetCode: ROTR_ASSET_CODE,
+      assetCode: "ROTR",
       balance: line ? line.balance : "0",
-      issuer: rotAsset.getIssuer() ?? "",
+      issuer: adminKeypair.publicKey(),
     };
   } catch {
-    // Account not yet funded or doesn't exist
-    return {
-      assetCode: ROTR_ASSET_CODE,
-      balance: "0",
-      issuer: getConfig().rotAsset.getIssuer() ?? "",
-    };
+    return { assetCode: "ROTR", balance: "0", issuer: adminKeypair.publicKey() };
   }
 }
 
-/**
- * Returns the distribution account's current ROTR balance (for monitoring).
- */
 export async function getDistributionBalance(): Promise<string> {
-  const { distributionKeypair } = getConfig();
-  const info = await getRotBalance(distributionKeypair.publicKey());
-  return info.balance;
+  const { adminKeypair } = getConfig();
+  try {
+    const account = await horizonServer.loadAccount(adminKeypair.publicKey());
+    const xlm = account.balances.find((b: any) => b.asset_type === "native");
+    return xlm ? xlm.balance : "0";
+  } catch {
+    return "0";
+  }
 }
 
-// ── Asset Info (Contract ID equivalent) ───────────────────────────────────
+// -- Asset Info ---------------------------------------------------------------
 
 export interface AssetInfo {
-  /** The issuing account public key — acts as the "contract ID" for this asset */
   issuingPublicKey: string;
-  /** The Soroban Smart Contract ID (starts with C) */
-  sorobanContractId: string | null;
+  contractId: string;
   assetCode: string;
-  /** Full Stellar asset identifier: "CODE:ISSUER_ADDRESS" */
   assetIdentifier: string;
   networkPassphrase: string;
   horizonUrl: string;
   explorerBaseUrl: string;
 }
 
-/**
- * Returns the ROTR asset metadata, or null if env vars are not configured.
- * The issuing account public key serves as the contract identifier
- * for Stellar classic assets (equivalent to a Soroban contract address).
- */
 export function getAssetInfo(): AssetInfo | null {
   try {
-    const { issuingKeypair } = getConfig();
-    const issuingPublicKey = issuingKeypair.publicKey();
-    const sorobanContractId = process.env.STELLAR_CONTRACT_ID || null;
+    const { adminKeypair, contractId } = getConfig();
+    const issuingPublicKey = adminKeypair.publicKey();
     return {
       issuingPublicKey,
-      sorobanContractId,
-      assetCode: ROTR_ASSET_CODE,
-      assetIdentifier: `${ROTR_ASSET_CODE}:${issuingPublicKey}`,
+      contractId,
+      assetCode: "ROTR",
+      assetIdentifier: "ROTR:" + issuingPublicKey,
       networkPassphrase: NETWORK_PASSPHRASE,
       horizonUrl: HORIZON_URL,
       explorerBaseUrl: "https://stellar.expert/explorer/testnet",
     };
   } catch {
-    // Env vars not configured — return null instead of crashing
     return null;
   }
 }

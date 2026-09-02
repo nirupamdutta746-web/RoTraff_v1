@@ -6,9 +6,9 @@ import { api } from "./_generated/api";
 import { sendRewardPayment } from "../lib/stellar";
 
 /**
- * Process a single pending reward by sending Stellar payment.
+ * Process a single pending reward by calling the Soroban ROTR contract.
  * Called via scheduler after creditReport writes the pending row.
- * On failure: marks the row as "failed" (does NOT throw — failure should not crash anything).
+ * On failure: marks the row as failed (does NOT throw — failure should not crash anything).
  */
 export const processPendingReward = action({
   args: { rewardTransactionId: v.id("rewardTransactions") },
@@ -56,7 +56,7 @@ export const processPendingReward = action({
     try {
       const result = await sendRewardPayment(
         wallet.publicKey,
-        rewardRow.amount,
+        rewardRow.incidentId ? parseInt(String(rewardRow.incidentId).replace(/[^0-9]/g, "").slice(0, 15) || "0", 10) : 0,
       );
 
       await ctx.runMutation(api.rewards.confirmReward, {
@@ -65,7 +65,7 @@ export const processPendingReward = action({
       });
     } catch (error) {
       console.error(
-        `[Reward] Stellar payment failed for tx ${args.rewardTransactionId}:`,
+        `[Reward] Soroban contract call failed for tx ${args.rewardTransactionId}:`,
         error,
       );
       await ctx.runMutation(api.rewards.updateRewardStatus, {

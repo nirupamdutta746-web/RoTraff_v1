@@ -1,0 +1,30 @@
+name: Build Soroban Contract
+
+on:
+  push:
+    paths:
+      - "contract/**"
+  workflow_dispatch:
+
+jobs:
+  build-wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Build contract
+        run: |
+          cd contract
+          cargo build --target wasm32v1-none --release
+
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rotr-token-wasm
+          path: contract/target/wasm32v1-none/release/rotr_token.wasm
+          retention-days: 30

@@ -44,7 +44,7 @@ RoTraff is a community-driven road safety platform that lets drivers report haza
 | **Routing** | TomTom Directions API, search, reverse geocoding |
 | **Backend** | Convex (serverless functions, real-time queries, mutations) |
 | **Auth** | @convex-dev/auth (email/password, OTP, anonymous) |
-| **Blockchain** | Stellar SDK, Soroban smart contracts (ROTR token) |
+| **Blockchain** | Stellar SDK + Soroban Rust contract (ROTR token, on-chain rewards) |
 | **Animations** | Framer Motion |
 | **Toasts** | Sonner |
 
@@ -95,19 +95,32 @@ The app will be available at `http://localhost:5173`.
 If you want the reward system:
 
 ```bash
-# Generate keypairs and fund accounts
+# 1. Install Rust (if not already installed)
+# https://rustup.rs
+
+# 2. Add the WASM target
+rustup target add wasm32v1-none
+
+# 3. Build the Soroban contract
+cd contract && cargo build --target wasm32v1-none --release
+
+# 4. Generate keypairs and fund accounts
 npx tsx scripts/setup-stellar.ts
 
-# Deploy the Soroban token contract
+# 5. Deploy the contract to Soroban Testnet
 npx tsx scripts/deploy-soroban-contract.ts
 ```
 
-Then add the printed environment variables to your Convex dashboard.
+The deploy script will print the contract ID (starts with C). Add it to your Convex dashboard as `STELLAR_CONTRACT_ID`.
 
 ## Project Structure
 
 ```
 rotraff/
+├── contract/                # Soroban smart contract (Rust)
+│   ├── Cargo.toml           # Rust project config (soroban-sdk v21)
+│   └── src/
+│       └── lib.rs           # ROTR token + reward logic (SEP-41)
 ├── public/                  # Static assets (logo, manifest)
 ├── src/
 │   ├── components/
@@ -120,14 +133,14 @@ rotraff/
 │   │   ├── auth.ts          # Auth providers (password, OTP, anonymous)
 │   │   ├── incidents.ts     # Incident CRUD, verification, downvoting
 │   │   ├── rewards.ts       # Reward transaction logic
-│   │   ├── rewardActions.ts # Stellar payment execution
+│   │   ├── rewardActions.ts # Soroban contract reward execution
 │   │   ├── wallets.ts       # Wallet provisioning, balance, asset info
 │   │   ├── sessions.ts      # Driving session tracking
 │   │   ├── users.ts         # User management, roles, admin
 │   │   └── schema.ts        # Convex database schema
 │   ├── hooks/               # Custom React hooks (auth, mobile, rewards)
 │   ├── lib/
-│   │   ├── stellar.ts       # Stellar SDK integration (keypair, payments)
+│   │   ├── stellar.ts       # Soroban contract invocations + Stellar keypair mgmt
 │   │   ├── crypto-node.ts   # AES-256-GCM encryption for secret keys
 │   │   ├── tomtom.ts        # TomTom API helpers (routes, geocoding)
 │   │   └── utils.ts         # cn() helper and shared utilities
@@ -141,7 +154,7 @@ rotraff/
 │   │   └── AdminDashboard.tsx # Admin panel (users, incidents, system)
 │   ├── main.tsx             # App entry point and router
 │   └── index.css            # Global styles, Leaflet overrides, glassmorphism
-├── scripts/                 # One-time Stellar setup scripts
+├── scripts/                 # Stellar setup + Soroban contract deployment
 ├── index.html               # HTML entry point
 ├── vite.config.ts           # Vite configuration
 └── package.json
@@ -174,11 +187,29 @@ rotraff/
    - **Safest** — avoids areas with high incident density
 4. Risk scores factor in nearby incidents and their severity
 
+### Soroban Smart Contract
+
+The ROTR token is a custom Soroban contract (`contract/src/lib.rs`) implementing SEP-41:
+
+| Function | Description |
+|----------|-------------|
+| `initialize(admin, report_reward, verify_reward)` | One-time setup with admin key and reward amounts |
+| `reward_report(admin, user, incident_id)` | Mints ROTR to user for a verified report, logs to on-chain ledger |
+| `reward_verification(admin, user, incident_id)` | Mints ROTR to user for community verification |
+| `balance(user)` | Query a user's ROTR balance |
+| `transfer(from, to, amount)` | SEP-41 compliant token transfer |
+| `mint(admin, to, amount)` | Admin emergency minting |
+| `set_report_reward / set_verify_reward` | Admin updates reward amounts |
+
+The contract is compiled to WASM via `cargo build --target wasm32v1-none --release` and deployed to Soroban Testnet.
+
 ### Wallet & Rewards
 
-- Earn **ROTR tokens** on Stellar testnet for:
-  - Reporting verified incidents
-  - Participating in community verification
+- Earn **ROTR tokens** on Stellar testnet via the Soroban smart contract:
+  - Reporting verified incidents → contract calls `reward_report()`
+  - Participating in community verification → contract calls `reward_verification()`
+- All reward entries are logged **on-chain** in the contract's reward ledger
+- Token balances are managed by the contract (no trustlines needed)
 - View balance, transaction history, and receive tokens via QR code
 - Wallet credentials are protected behind password verification
 
@@ -192,6 +223,7 @@ rotraff/
 | `npm run lint` | Run ESLint |
 | `npm run format` | Format with Prettier |
 | `npx convex dev` | Start Convex backend (separate terminal) |
+| `cargo build --target wasm32v1-none --release` | Build Soroban contract to WASM (in `contract/`) |
 
 ## License
 
